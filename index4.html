@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>教科書メーカー Studio</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;700&family=Noto+Serif+JP:wght@400;700&family=Yomogi&family=Hachi+Maru+Pop&family=Zen+Maru+Gothic:wght@400;700&family=DotGothic16&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index4.css">
+</head>
+<body>
+<div id="app">
+  <aside id="left-panel">
+    <div class="panel-header">
+      記述・挿入
+      <span class="badge">左パネル</span>
+    </div>
+    <div class="panel-body">
+      <section class="panel-section">
+        <h3>本文・ポイント</h3>
+        <label for="main-text">本文</label>
+        <textarea id="main-text" placeholder="本文を入力"></textarea>
+        <label for="point-text">ポイント</label>
+        <textarea id="point-text" placeholder="ポイントや要点を入力"></textarea>
+        <div class="control-row single">
+          <label>入力フォーム色</label>
+          <div class="control-row">
+            <div>
+              <label for="input-text-color">文字色</label>
+              <input id="input-text-color" type="color" value="#f2f2f2">
+              <div class="color-readout">
+                <span id="input-text-color-swatch" class="color-swatch"></span>
+                <span id="input-text-color-code" class="color-code">#f2f2f2</span>
+              </div>
+            </div>
+            <div>
+              <label for="input-border-color">枠線色</label>
+              <input id="input-border-color" type="color" value="#3b3c46">
+              <div class="color-readout">
+                <span id="input-border-color-swatch" class="color-swatch"></span>
+                <span id="input-border-color-code" class="color-code">#3b3c46</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="control-row">
+          <div>
+            <label for="font-family">フォント</label>
+            <select id="font-family">
+              <option value="'Noto Serif JP'">教科書明朝</option>
+              <option value="'Noto Sans JP'">教科書ゴシック</option>
+              <option value="'Zen Maru Gothic'">丸ゴシック</option>
+              <option value="'Yomogi'">ひよこ文字</option>
+              <option value="'Hachi Maru Pop'">ふんわり文字</option>
+              <option value="'DotGothic16'">レトロ</option>
+            </select>
+          </div>
+          <div>
+            <label for="font-size">文字サイズ</label>
+            <input id="font-size" type="number" min="8" max="96" value="18">
+          </div>
+        </div>
+        <div class="inline-row">
+          <label class="pill"><input id="font-bold" type="checkbox"> 太字</label>
+          <label class="pill"><input id="font-underline" type="checkbox"> 下線</label>
+          <label class="pill"><input id="font-italic" type="checkbox"> 斜体</label>
+        </div>
+        <div class="control-row">
+          <div>
+            <label for="font-color">文字色</label>
+            <input id="font-color" type="color" value="#1b1b1b">
+          </div>
+          <div>
+            <label for="bg-color">背景色</label>
+            <input id="bg-color" type="color" value="#ffffff">
+            <label class="pill"><input id="bg-transparent" type="checkbox" checked> 背景透過</label>
+          </div>
+        </div>
+        <div class="control-row">
+          <div>
+            <label for="border-color">枠線色</label>
+            <input id="border-color" type="color" value="#111111">
+          </div>
+          <div>
+            <label for="border-width">枠線幅</label>
+            <input id="border-width" type="number" min="0" max="10" value="0">
+          </div>
+        </div>
+        <div class="control-row">
+          <div>
+            <label for="text-align">整列</label>
+            <select id="text-align">
+              <option value="left">左寄せ</option>
+              <option value="center">中央</option>
+              <option value="right">右寄せ</option>
+              <option value="justify">両端</option>
+            </select>
+          </div>
+          <div>
+            <label for="line-height">行間</label>
+            <input id="line-height" type="number" min="1" max="3" step="0.1" value="1.5">
+          </div>
+        </div>
+        <div class="control-row single emoji-picker-wrap">
+          <label>絵文字</label>
+          <div class="inline-row">
+            <button id="emoji-picker-toggle" type="button">Emoji Mart を開く</button>
+          </div>
+          <div id="emoji-picker-pop" class="emoji-picker-pop"></div>
+        </div>
+        <div class="control-row">
+          <button class="primary" id="add-text">本文を追加</button>
+          <button class="primary" id="add-point">ポイントを追加</button>
+        </div>
+      </section>
+
+      <section class="panel-section">
+        <h3>画像・描画</h3>
+        <button id="add-image" class="primary">写真を追加</button>
+        <span class="hint">画像はプレビューにドラッグ＆ドロップでも追加できます。</span>
+        <input id="image-input" type="file" accept="image/*" hidden>
+        <div class="control-row single">
+          <label>描画ツール</label>
+          <div class="control-row">
+            <div>
+              <label for="draw-color">ペン色</label>
+              <input id="draw-color" type="color" value="#1b1b1b">
+              <div class="color-readout">
+                <span id="draw-color-swatch" class="color-swatch"></span>
+                <span id="draw-color-code" class="color-code">#1b1b1b</span>
+              </div>
+            </div>
+            <div>
+              <label for="draw-width">太さ</label>
+              <input id="draw-width" type="number" min="1" max="24" value="3">
+            </div>
+          </div>
+          <div class="control-row">
+            <div>
+              <label for="draw-fill-color">塗り色</label>
+              <input id="draw-fill-color" type="color" value="#1b1b1b">
+              <div class="color-readout">
+                <span id="draw-fill-color-swatch" class="color-swatch"></span>
+                <span id="draw-fill-color-code" class="color-code">#1b1b1b</span>
+              </div>
+            </div>
+            <div>
+              <label for="draw-fill-opacity">塗り濃さ</label>
+              <input id="draw-fill-opacity" type="number" min="0" max="1" step="0.05" value="0.2">
+            </div>
+          </div>
+          <label class="pill"><input id="draw-fill-enabled" type="checkbox" checked> 塗りつぶし</label>
+          <div class="inline-row draw-tools">
+            <button class="draw-tool active" data-tool="curve" type="button">曲線</button>
+            <button class="draw-tool" data-tool="line" type="button">直線</button>
+            <button class="draw-tool" data-tool="segment" type="button">線分図</button>
+            <button class="draw-tool" data-tool="arc" type="button">弧</button>
+            <button class="draw-tool" data-tool="circle" type="button">正円</button>
+            <button class="draw-tool" data-tool="ellipse" type="button">楕円</button>
+            <button class="draw-tool" data-tool="square" type="button">四角形</button>
+            <button class="draw-tool" data-tool="rect" type="button">長方形</button>
+            <button class="draw-tool" data-tool="bar" type="button">棒</button>
+          </div>
+          <div class="inline-row">
+            <button id="draw-toggle" class="primary" type="button">描画: OFF</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel-section">
+        <h3>レイヤー</h3>
+        <div id="layer-list" class="layer-list"></div>
+        <span class="hint">上にあるほど前面に表示されます。</span>
+      </section>
+    </div>
+  </aside>
+
+  <div id="resizer-left" class="resizer"></div>
+
+  <main id="center-panel">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="page-add" class="primary">ページ追加</button>
+        <button id="page-delete" class="danger">ページ削除</button>
+        <select id="page-select"></select>
+        <button id="page-prev">前</button>
+        <button id="page-next">次</button>
+      </div>
+      <div class="toolbar-group">
+        <button id="toggle-view">見開き: OFF</button>
+        <button id="toggle-grid">グリッド: ON</button>
+        <label class="pill">ズーム <input id="zoom-range" type="range" min="0.4" max="1.5" step="0.1" value="1"></label>
+      </div>
+      <div class="toolbar-group">
+        <button id="print-pdf" class="primary">PDF書き出し</button>
+        <button id="save-local">保存</button>
+        <button id="load-local">読み込み</button>
+        <button id="export-json">JSON書き出し</button>
+        <label class="file-button pill">JSON読み込み <input id="import-json" type="file" accept="application/json"></label>
+      </div>
+    </div>
+
+    <div class="preview" id="preview">
+      <div id="page-container" class="page-container"></div>
+    </div>
+  </main>
+
+  <div id="resizer-right" class="resizer"></div>
+
+  <aside id="right-panel">
+    <div class="panel-header">
+      設定・プロジェクト
+      <span class="badge">右パネル</span>
+    </div>
+    <div class="panel-body">
+      <section class="panel-section">
+        <h3>教科書情報</h3>
+        <label for="book-title">タイトル</label>
+        <input id="book-title" type="text" placeholder="例: たのしい算数">
+        <label for="book-subject">教科 / 分野</label>
+        <input id="book-subject" type="text" placeholder="例: 算数・国語・理科">
+        <label for="book-grade">学年</label>
+        <input id="book-grade" type="text" placeholder="例: 小学3年">
+        <label for="book-author">作成者</label>
+        <input id="book-author" type="text" placeholder="担当者名">
+      </section>
+
+      <section class="panel-section">
+        <h3>選択中の設定</h3>
+        <div id="no-selection" class="muted">未選択です。プレビューから要素をクリックしてください。</div>
+        <div id="inspector" style="display:none">
+          <div class="inspector-grid">
+            <div>
+              <label for="ins-x">X</label>
+              <input id="ins-x" type="number" data-field="x">
+            </div>
+            <div>
+              <label for="ins-y">Y</label>
+              <input id="ins-y" type="number" data-field="y">
+            </div>
+            <div>
+              <label for="ins-w">幅</label>
+              <input id="ins-w" type="number" data-field="w">
+            </div>
+            <div>
+              <label for="ins-h">高さ</label>
+              <input id="ins-h" type="number" data-field="h">
+            </div>
+            <div>
+              <label for="ins-rot">回転</label>
+              <input id="ins-rot" type="number" data-field="rotation">
+            </div>
+            <div>
+              <label for="ins-op">不透明度</label>
+              <input id="ins-op" type="number" step="0.1" min="0" max="1" data-field="opacity">
+            </div>
+          </div>
+          <div id="inspector-text-tools">
+            <label for="ins-text">本文</label>
+            <textarea id="ins-text" data-field="text"></textarea>
+            <div class="control-row">
+              <div>
+                <label for="ins-font">フォント</label>
+                <select id="ins-font" data-field="fontFamily">
+                  <option value="'Noto Serif JP'">教科書明朝</option>
+                  <option value="'Noto Sans JP'">教科書ゴシック</option>
+                  <option value="'Zen Maru Gothic'">丸ゴシック</option>
+                  <option value="'Yomogi'">ひよこ文字</option>
+                  <option value="'Hachi Maru Pop'">ふんわり文字</option>
+                  <option value="'DotGothic16'">レトロ</option>
+                </select>
+              </div>
+              <div>
+                <label for="ins-font-size">文字サイズ</label>
+                <input id="ins-font-size" type="number" data-field="fontSize">
+              </div>
+            </div>
+            <div class="inline-row">
+              <label class="pill"><input id="ins-bold" type="checkbox" data-field="bold"> 太字</label>
+              <label class="pill"><input id="ins-underline" type="checkbox" data-field="underline"> 下線</label>
+              <label class="pill"><input id="ins-italic" type="checkbox" data-field="italic"> 斜体</label>
+            </div>
+            <div class="control-row">
+              <div>
+                <label for="ins-color">文字色</label>
+                <input id="ins-color" type="color" data-field="color">
+              </div>
+              <div>
+                <label for="ins-bg">背景色</label>
+                <input id="ins-bg" type="color" data-field="bgColor">
+                <label class="pill"><input id="ins-bg-transparent" type="checkbox" data-field="bgTransparent"> 背景透過</label>
+              </div>
+            </div>
+            <div class="control-row">
+              <div>
+                <label for="ins-border-color">枠線色</label>
+                <input id="ins-border-color" type="color" data-field="borderColor">
+              </div>
+              <div>
+                <label for="ins-border-width">枠線幅</label>
+                <input id="ins-border-width" type="number" data-field="borderWidth">
+              </div>
+            </div>
+            <div class="control-row">
+              <div>
+                <label for="ins-align">整列</label>
+                <select id="ins-align" data-field="textAlign">
+                  <option value="left">左寄せ</option>
+                  <option value="center">中央</option>
+                  <option value="right">右寄せ</option>
+                  <option value="justify">両端</option>
+                </select>
+              </div>
+              <div>
+                <label for="ins-line">行間</label>
+                <input id="ins-line" type="number" step="0.1" data-field="lineHeight">
+              </div>
+            </div>
+          </div>
+          <div id="inspector-draw-tools" style="display:none">
+            <div class="control-row">
+              <div>
+                <label for="ins-draw-stroke">ペン色</label>
+                <input id="ins-draw-stroke" type="color" data-field="strokeColor">
+                <div class="color-readout">
+                  <span id="ins-draw-stroke-swatch" class="color-swatch"></span>
+                  <span id="ins-draw-stroke-code" class="color-code">#1b1b1b</span>
+                </div>
+              </div>
+              <div>
+                <label for="ins-draw-width">太さ</label>
+                <input id="ins-draw-width" type="number" min="1" max="24" data-field="strokeWidth">
+              </div>
+            </div>
+            <div class="control-row">
+              <div>
+                <label for="ins-draw-fill-color">塗り色</label>
+                <input id="ins-draw-fill-color" type="color" data-field="fillColor">
+                <div class="color-readout">
+                  <span id="ins-draw-fill-swatch" class="color-swatch"></span>
+                  <span id="ins-draw-fill-code" class="color-code">#1b1b1b</span>
+                </div>
+              </div>
+              <div>
+                <label for="ins-draw-fill-opacity">塗り濃さ</label>
+                <input id="ins-draw-fill-opacity" type="number" min="0" max="1" step="0.05" data-field="fillOpacity">
+              </div>
+            </div>
+            <label class="pill"><input id="ins-draw-fill-enabled" type="checkbox" data-field="fillEnabled"> 塗りつぶし</label>
+          </div>
+          <button id="delete-item" class="danger">選択アイテムを削除</button>
+        </div>
+      </section>
+
+      <section class="panel-section">
+        <h3>用語リスト</h3>
+        <input id="glossary-term" type="text" placeholder="用語">
+        <input id="glossary-def" type="text" placeholder="説明">
+        <button id="add-glossary">用語を追加</button>
+        <div id="glossary-list" class="list"></div>
+      </section>
+
+      <section class="panel-section">
+        <h3>参考・引用</h3>
+        <input id="citation-input" type="text" placeholder="参考資料やURL">
+        <button id="add-citation">参考を追加</button>
+        <div id="citation-list" class="list"></div>
+      </section>
+
+      <section class="panel-section">
+        <h3>チェックリスト</h3>
+        <input id="check-input" type="text" placeholder="確認項目">
+        <button id="add-check">追加</button>
+        <div id="check-list" class="list"></div>
+      </section>
+
+      <section class="panel-section">
+        <h3>ヒント</h3>
+        <div class="hint">
+          プレビューでダブルクリックすると本文を直接編集できます。<br>
+          画像はドラッグ＆ドロップで配置できます。<br>
+          見開き表示中はページをまたいで移動できます。
+        </div>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/browser.js"></script>
+<script src="index4.js"></script>
+</body>
+</html>
