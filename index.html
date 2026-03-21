@@ -196,6 +196,7 @@
           <option value="number">数直線</option>
           <option value="segment">線分図</option>
           <option value="double">二重数直線</option>
+          <option value="ribbon">リボン数直線</option>
           <option value="protractor">分度器</option>
         </select>
         <div class="control-row">
@@ -236,8 +237,38 @@
             </div>
           </div>
         </div>
+        <div id="line-ribbon-options" class="expand-block">
+          <div class="control-row">
+            <div>
+              <label for="line-ribbon-height">帯の太さ(px)</label>
+              <input id="line-ribbon-height" type="number" min="6" max="80" value="18">
+            </div>
+            <div>
+              <label for="line-ribbon-fill">帯の色</label>
+              <input id="line-ribbon-fill" type="color" value="#d9e6ff">
+            </div>
+          </div>
+        </div>
         <div id="line-protractor-options" class="expand-block">
-          <label class="pill"><input id="protractor-labels" type="checkbox" checked> 分度器の数値を表示</label>
+          <div class="control-row">
+            <div>
+              <label for="protractor-step">目盛り刻み(°)</label>
+              <input id="protractor-step" type="number" min="1" max="30" value="10">
+            </div>
+            <div class="inline-row">
+              <label class="pill"><input id="protractor-labels" type="checkbox" checked> 分度器の数値を表示</label>
+            </div>
+          </div>
+          <div class="control-row">
+            <div>
+              <label for="protractor-line-color">目盛り色</label>
+              <input id="protractor-line-color" type="color" value="#1b1b1b">
+            </div>
+            <div>
+              <label for="protractor-text-color">数値色</label>
+              <input id="protractor-text-color" type="color" value="#1b1b1b">
+            </div>
+          </div>
         </div>
         <div class="control-row">
           <div>
@@ -324,6 +355,20 @@
             </div>
           </div>
           <label class="pill"><input id="draw-fill-enabled" type="checkbox" checked> 塗りつぶし</label>
+          <div id="draw-arc-options" class="control-row single">
+            <label for="draw-arc-label">弧の数値</label>
+            <input id="draw-arc-label" type="text" placeholder="例: 120°">
+            <div class="control-row">
+              <div>
+                <label for="draw-arc-label-color">弧の文字色</label>
+                <input id="draw-arc-label-color" type="color" value="#1b1b1b">
+              </div>
+              <div>
+                <label for="draw-arc-label-size">弧の文字サイズ</label>
+                <input id="draw-arc-label-size" type="number" min="8" max="48" value="14">
+              </div>
+            </div>
+          </div>
           <div class="inline-row draw-tools">
             <button class="draw-tool active" data-tool="curve" type="button">曲線</button>
             <button class="draw-tool" data-tool="line" type="button">直線</button>
@@ -579,6 +624,20 @@
               </div>
             </div>
             <label class="pill"><input id="ins-draw-fill-enabled" type="checkbox" data-field="fillEnabled"> 塗りつぶし</label>
+            <div id="ins-draw-arc-label-wrap" class="control-row single">
+              <label for="ins-draw-arc-label">弧の数値</label>
+              <input id="ins-draw-arc-label" type="text" data-field="arcLabel">
+              <div class="control-row">
+                <div>
+                  <label for="ins-draw-arc-label-color">弧の文字色</label>
+                  <input id="ins-draw-arc-label-color" type="color" data-field="arcLabelColor">
+                </div>
+                <div>
+                  <label for="ins-draw-arc-label-size">弧の文字サイズ</label>
+                  <input id="ins-draw-arc-label-size" type="number" min="8" max="48" data-field="arcLabelSize">
+                </div>
+              </div>
+            </div>
           </div>
           <div id="inspector-math-tools" style="display:none">
             <label for="ins-latex">数式(LaTeX)</label>

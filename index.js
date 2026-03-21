@@ -399,7 +399,10 @@
               : (item.drawKind === 'bar' ? 0.25 : 1),
             fillEnabled: typeof item.fillEnabled === 'boolean'
               ? item.fillEnabled
-              : (item.drawKind === 'bar')
+              : (item.drawKind === 'bar'),
+            arcLabel: item.arcLabel || '',
+            arcLabelColor: item.arcLabelColor || item.strokeColor || '#1b1b1b',
+            arcLabelSize: typeof item.arcLabelSize === 'number' ? item.arcLabelSize : 14
           })) : []
         }))
       : base.pages;
@@ -568,6 +571,10 @@
     $$('.draw-tool').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === state.view.drawTool);
     });
+    const arcOptions = $('#draw-arc-options');
+    if (arcOptions) {
+      arcOptions.style.display = state.view.drawTool === 'arc' ? 'block' : 'none';
+    }
     updateFullscreenButton();
   };
 
@@ -972,6 +979,22 @@
             path.setAttribute('stroke-linecap', 'round');
             path.setAttribute('stroke-linejoin', 'round');
             svg.appendChild(path);
+            const labelText = String(item.arcLabel || '').trim();
+            if (labelText) {
+              const t = 0.5;
+              const x = (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * pc.x + t * t * p1.x;
+              const y = (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * pc.y + t * t * p1.y;
+              const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+              const size = typeof item.arcLabelSize === 'number' ? item.arcLabelSize : 14;
+              text.setAttribute('x', x);
+              text.setAttribute('y', y);
+              text.setAttribute('text-anchor', 'middle');
+              text.setAttribute('dominant-baseline', 'middle');
+              text.setAttribute('font-size', size);
+              text.setAttribute('fill', item.arcLabelColor || stroke);
+              text.textContent = labelText;
+              svg.appendChild(text);
+            }
           } else if (kind === 'rect') {
             const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
             rect.setAttribute('x', 0);
@@ -1229,6 +1252,16 @@
       $('#ins-draw-fill-enabled').checked = typeof item.fillEnabled === 'boolean' ? item.fillEnabled : (item.drawKind === 'bar');
       updateColorReadout($('#ins-draw-stroke-swatch'), $('#ins-draw-stroke-code'), $('#ins-draw-stroke').value);
       updateColorReadout($('#ins-draw-fill-swatch'), $('#ins-draw-fill-code'), $('#ins-draw-fill-color').value);
+      const arcWrap = $('#ins-draw-arc-label-wrap');
+      if (arcWrap) {
+        const isArc = item.drawKind === 'arc';
+        arcWrap.style.display = isArc ? 'block' : 'none';
+        if (isArc) {
+          $('#ins-draw-arc-label').value = item.arcLabel || '';
+          $('#ins-draw-arc-label-color').value = item.arcLabelColor || '#1b1b1b';
+          $('#ins-draw-arc-label-size').value = typeof item.arcLabelSize === 'number' ? item.arcLabelSize : 14;
+        }
+      }
     } else {
       drawTools.style.display = 'none';
     }
@@ -1442,7 +1475,10 @@
     strokeWidth: parseFloat($('#draw-width')?.value) || 3,
     fillColor: $('#draw-fill-color') ? $('#draw-fill-color').value : '#1b1b1b',
     fillOpacity: clamp(parseFloat($('#draw-fill-opacity')?.value) || 0, 0, 1),
-    fillEnabled: $('#draw-fill-enabled') ? $('#draw-fill-enabled').checked : false
+    fillEnabled: $('#draw-fill-enabled') ? $('#draw-fill-enabled').checked : false,
+    arcLabel: $('#draw-arc-label') ? $('#draw-arc-label').value : '',
+    arcLabelColor: $('#draw-arc-label-color') ? $('#draw-arc-label-color').value : '#1b1b1b',
+    arcLabelSize: parseFloat($('#draw-arc-label-size')?.value) || 14
   });
 
   const getEmojiTarget = () => {
@@ -1568,10 +1604,10 @@
   ]);
   const MATH_FIELDS = new Set(['latex','mathColor','mathBold','mathItalic','mathUnderline','mathSize']);
   const DRAW_FIELDS = new Set([
-    'strokeColor','strokeWidth','fillColor','fillOpacity','fillEnabled'
+    'strokeColor','strokeWidth','fillColor','fillOpacity','fillEnabled','arcLabel','arcLabelColor','arcLabelSize'
   ]);
   const NUM_FIELDS = new Set([
-    'x','y','w','h','rotation','opacity','fontSize','borderWidth','lineHeight','strokeWidth','fillOpacity','mathSize','textCombineDigits'
+    'x','y','w','h','rotation','opacity','fontSize','borderWidth','lineHeight','strokeWidth','fillOpacity','mathSize','textCombineDigits','arcLabelSize'
   ]);
   const CLAMP_0_1_FIELDS = new Set(['opacity','fillOpacity']);
   const addTextItem = (kind) => {
@@ -1734,7 +1770,9 @@
   const generateNumberLineSvg = (options) => {
     const {
       kind, min, max, step, length, lineColor, textColor,
-      min2, max2, step2, showProtractorLabels = true
+      min2, max2, step2, showProtractorLabels = true,
+      protractorStep = 10, protractorLineColor, protractorTextColor,
+      ribbonHeight = 18, ribbonFill = '#d9e6ff'
     } = options;
     const padding = 24;
     const baseY = 40;
@@ -1794,25 +1832,40 @@
       }
       drawTicks(lineY, true, 18, topLabel);
       drawTicks(secondY, true, 18, bottomLabel);
+    } else if (kind === 'ribbon') {
+      const barHeight = Math.max(8, ribbonHeight || 18);
+      const barY = lineY - barHeight / 2;
+      const radius = Math.min(8, barHeight / 2);
+      const label = (i) => formatNumber(min + step * i);
+      parts += `<rect x="${padding}" y="${barY}" width="${usable}" height="${barHeight}" rx="${radius}" fill="${ribbonFill}" stroke="${lineColor}" stroke-width="2" />`;
+      for (let i = 0; i <= tickCount; i += 1) {
+        const x = padding + (usable * i) / tickCount;
+        parts += `<line x1="${x}" y1="${barY}" x2="${x}" y2="${barY - 10}" stroke="${lineColor}" stroke-width="2" />`;
+        const value = label(i);
+        parts += `<text x="${x}" y="${barY - 14}" text-anchor="middle" font-size="12" fill="${textColor}">${value}</text>`;
+      }
     } else if (kind === 'protractor') {
       const radius = 120;
       const cx = radius + 20;
       const cy = radius + 20;
       const widthP = radius * 2 + 40;
       const heightP = radius + 40;
+      const tickStep = Number.isFinite(protractorStep) && protractorStep > 0 ? protractorStep : 10;
+      const strokeColor = protractorLineColor || lineColor;
+      const labelColor = protractorTextColor || textColor;
       parts = '';
-      parts += `<path d="M ${cx - radius} ${cy} A ${radius} ${radius} 0 0 1 ${cx + radius} ${cy}" fill="none" stroke="${lineColor}" stroke-width="2" />`;
-      for (let angle = 0; angle <= 180; angle += 10) {
+      parts += `<path d="M ${cx - radius} ${cy} A ${radius} ${radius} 0 0 1 ${cx + radius} ${cy}" fill="none" stroke="${strokeColor}" stroke-width="2" />`;
+      for (let angle = 0; angle <= 180; angle += tickStep) {
         const theta = Math.PI - (angle * Math.PI / 180);
         const x1 = cx + radius * Math.cos(theta);
         const y1 = cy - radius * Math.sin(theta);
         const x2 = cx + (radius - 10) * Math.cos(theta);
         const y2 = cy - (radius - 10) * Math.sin(theta);
-        parts += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${lineColor}" stroke-width="2" />`;
+        parts += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${strokeColor}" stroke-width="2" />`;
         if (showProtractorLabels) {
           const tx = cx + (radius - 26) * Math.cos(theta);
           const ty = cy - (radius - 26) * Math.sin(theta);
-          parts += `<text x="${tx}" y="${ty}" text-anchor="middle" font-size="10" fill="${textColor}">${angle}</text>`;
+          parts += `<text x="${tx}" y="${ty}" text-anchor="middle" font-size="10" fill="${labelColor}">${angle}</text>`;
         }
       }
       const svg = svgWrap(widthP, heightP, parts);
@@ -2249,7 +2302,10 @@
       strokeWidth: style.strokeWidth,
       fillColor: style.fillColor,
       fillOpacity: style.fillOpacity,
-      fillEnabled: style.fillEnabled
+      fillEnabled: style.fillEnabled,
+      arcLabel: style.arcLabel || '',
+      arcLabelColor: style.arcLabelColor || style.strokeColor,
+      arcLabelSize: typeof style.arcLabelSize === 'number' ? style.arcLabelSize : 14
     });
 
     if (tool === 'curve') {
@@ -2997,11 +3053,15 @@
     const addLineDiagram = $('#add-line-diagram');
     const lineKind = $('#line-kind');
     const lineDoubleOptions = $('#line-double-options');
+    const lineRibbonOptions = $('#line-ribbon-options');
     const lineProtractorOptions = $('#line-protractor-options');
     const updateLineOptions = () => {
       const kind = lineKind?.value || 'number';
       if (lineDoubleOptions) {
         lineDoubleOptions.classList.toggle('open', kind === 'double');
+      }
+      if (lineRibbonOptions) {
+        lineRibbonOptions.classList.toggle('open', kind === 'ribbon');
       }
       if (lineProtractorOptions) {
         lineProtractorOptions.classList.toggle('open', kind === 'protractor');
@@ -3027,13 +3087,23 @@
         const max2 = max2Raw !== '' && max2Raw != null ? parseFloat(max2Raw) : undefined;
         const step2 = step2Raw !== '' && step2Raw != null ? parseFloat(step2Raw) : undefined;
         const showProtractorLabels = $('#protractor-labels')?.checked ?? true;
+        const protractorStepRaw = $('#protractor-step')?.value;
+        const protractorStep = protractorStepRaw !== '' && protractorStepRaw != null
+          ? parseFloat(protractorStepRaw)
+          : 10;
+        const protractorLineColor = $('#protractor-line-color')?.value || lineColor;
+        const protractorTextColor = $('#protractor-text-color')?.value || textColor;
+        const ribbonHeight = parseFloat($('#line-ribbon-height')?.value) || 18;
+        const ribbonFill = $('#line-ribbon-fill')?.value || '#d9e6ff';
         if (kind !== 'protractor' && (step <= 0 || max <= min)) {
           showToast('最小・最大・刻みの値を確認してください。', 'info');
           return;
         }
         const diagram = generateNumberLineSvg({
           kind, min, max, step, length, lineColor, textColor,
-          min2, max2, step2, showProtractorLabels
+          min2, max2, step2, showProtractorLabels,
+          protractorStep, protractorLineColor, protractorTextColor,
+          ribbonHeight, ribbonFill
         });
         addSvgItem(diagram.svg, diagram.width, diagram.height, kind);
       });

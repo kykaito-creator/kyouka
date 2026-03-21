@@ -257,8 +257,12 @@ button.danger {
 }
 
 .expand-block.open {
-  max-height: 220px;
+  max-height: 320px;
   opacity: 1;
+}
+
+#draw-arc-options {
+  display: none;
 }
 
 .inline-row {
