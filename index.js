@@ -1966,7 +1966,8 @@
     state.pages.forEach((page) => {
       page.items.forEach((item) => {
         if (item.type !== 'svg' || !GRID_KINDS.has(item.svgKind)) return;
-        if (item.svgKind === 'array' || item.svgKind === 'grid' || !item.svg) {
+        const needsSpriteRebuild = !SPRITE_MASK_ENABLED && (item.svgKind === 'ohajiki' || item.svgKind === 'bead');
+        if (item.svgKind === 'array' || item.svgKind === 'grid' || needsSpriteRebuild || !item.svg) {
           rebuildGridSvg(item);
           changed = true;
         }
