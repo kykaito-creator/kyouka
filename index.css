@@ -661,6 +661,17 @@ button.danger {
   letter-spacing: 0.02em;
 }
 
+.count-indicator {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.count-indicator.over {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .emoji-picker-wrap {
   position: relative;
 }

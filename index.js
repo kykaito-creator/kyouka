@@ -602,6 +602,30 @@
     return `${italic}${weight} ${style.fontSize}px ${style.fontFamily}`;
   };
 
+  const measureAverageCharWidth = (style) => {
+    const ctx = getTextMeasureContext;
+    if (!ctx) return Math.max(6, style.fontSize * 0.6);
+    ctx.font = buildFontSpec(style);
+    const sample = 'ああああああああああ';
+    const width = ctx.measureText(sample).width;
+    const avg = width / sample.length;
+    return avg || Math.max(6, style.fontSize * 0.6);
+  };
+
+  const getTextCapacity = (pageId, style) => {
+    const { width: pageW, height: pageH } = getPagePixelSize(pageId);
+    const marginX = 40;
+    const marginY = 60;
+    const maxWidth = Math.max(120, pageW - marginX * 2);
+    const maxHeight = Math.max(120, pageH - marginY * 2);
+    const lineHeightPx = Math.max(1, (style.lineHeight || 1.5) * style.fontSize);
+    const maxLines = Math.max(1, Math.floor(maxHeight / lineHeightPx));
+    const avgCharWidth = measureAverageCharWidth(style);
+    const charsPerLine = Math.max(1, Math.floor(maxWidth / avgCharWidth));
+    const maxChars = maxLines * charsPerLine;
+    return { marginX, marginY, maxWidth, maxHeight, lineHeightPx, maxLines, charsPerLine, maxChars };
+  };
+
   const wrapTextToLines = (text, maxWidth, style) => {
     const ctx = getTextMeasureContext;
     if (!ctx) return String(text || '').split(/\r?\n/);
@@ -631,15 +655,11 @@
   const addPaginatedTextItems = (text, style, kind) => {
     const page = getSelectedPage();
     if (!page) return false;
-    const { width: pageW, height: pageH } = getPagePixelSize(page.id);
-    const marginX = 40;
-    const marginY = 60;
-    const maxWidth = Math.max(120, pageW - marginX * 2);
-    const maxHeight = Math.max(120, pageH - marginY * 2);
-    const lineHeightPx = Math.max(1, (style.lineHeight || 1.5) * style.fontSize);
-    const maxLines = Math.max(1, Math.floor(maxHeight / lineHeightPx));
+    const capacity = getTextCapacity(page.id, style);
+    const { marginX, marginY, maxWidth, maxHeight, lineHeightPx, maxLines, maxChars } = capacity;
     const lines = wrapTextToLines(text, maxWidth, style);
-    if (lines.length <= maxLines) return false;
+    const rawLength = String(text || '').replace(/\r\n/g, '\n').length;
+    if (lines.length <= maxLines && rawLength <= maxChars) return false;
 
     const chunks = [];
     for (let i = 0; i < lines.length; i += maxLines) {
@@ -679,6 +699,21 @@
     scheduleSave();
     pushHistory();
     return true;
+  };
+
+  const updateMainTextCounter = () => {
+    const counter = $('#main-text-count');
+    const textarea = $('#main-text');
+    if (!counter || !textarea) return;
+    const page = getSelectedPage();
+    if (!page) return;
+    const style = getInsertionStyle();
+    const { maxChars } = getTextCapacity(page.id, style);
+    const length = String(textarea.value || '').replace(/\r\n/g, '\n').length;
+    const remaining = maxChars - length;
+    counter.textContent = `残り ${remaining} 文字 (最大 ${maxChars})`;
+    counter.classList.toggle('over', remaining < 0);
+    counter.title = '用紙サイズ・文字サイズ・行間から算出した目安です。改行を多用すると少なくなります。';
   };
 
   const PAGE_SIZES = {
@@ -1510,6 +1545,7 @@
     renderLayers();
     renderInspector();
     renderSupport();
+    updateMainTextCounter();
   };
 
   const getNextPageIndex = (currentIndex, direction) => {
@@ -1523,9 +1559,16 @@
     const next = Array.isArray(ids) ? ids.filter(Boolean) : [];
     state.selectedItemIds = next;
     state.selectedItemId = next[next.length - 1] || null;
+    if (state.selectedItemId) {
+      const page = state.pages.find(p => p.items.some(i => i.id === state.selectedItemId));
+      if (page) {
+        state.selectedPageId = page.id;
+      }
+    }
     renderPages();
     renderLayers();
     renderInspector();
+    updateMainTextCounter();
   };
 
   const selectItem = (id, options = {}) => {
@@ -3076,6 +3119,7 @@
         state.view.pageSize = e.target.value;
         applyPageSize(state.view.pageSize);
         renderPages();
+        updateMainTextCounter();
         scheduleSave();
       });
     }
@@ -3328,6 +3372,17 @@
     updateColorReadout(drawFillSwatch, drawFillCode, drawFillColor?.value || '#1b1b1b');
     if (drawFillOpacity) drawFillOpacity.addEventListener('input', scheduleSave);
     if (drawFillEnabled) drawFillEnabled.addEventListener('change', scheduleSave);
+
+    const mainText = $('#main-text');
+    if (mainText) {
+      mainText.addEventListener('input', updateMainTextCounter);
+    }
+    const fontSizeInput = $('#font-size');
+    const lineHeightInput = $('#line-height');
+    const fontFamilySelect = $('#font-family');
+    if (fontSizeInput) fontSizeInput.addEventListener('input', updateMainTextCounter);
+    if (lineHeightInput) lineHeightInput.addEventListener('input', updateMainTextCounter);
+    if (fontFamilySelect) fontFamilySelect.addEventListener('change', updateMainTextCounter);
 
     $('#add-image').addEventListener('click', () => $('#image-input').click());
     $('#image-input').addEventListener('change', (e) => {
