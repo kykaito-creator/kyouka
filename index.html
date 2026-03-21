@@ -368,6 +368,23 @@
                 <input id="draw-arc-label-size" type="number" min="8" max="48" value="14">
               </div>
             </div>
+            <label class="pill"><input id="draw-arc-label-bg-enabled" type="checkbox"> 文字背景を表示</label>
+            <div class="control-row">
+              <div>
+                <label for="draw-arc-label-bg-color">背景色</label>
+                <input id="draw-arc-label-bg-color" type="color" value="#ffffff">
+              </div>
+              <div>
+                <label for="draw-arc-label-bg-opacity">背景の濃さ</label>
+                <input id="draw-arc-label-bg-opacity" type="number" min="0" max="1" step="0.05" value="0.85">
+              </div>
+            </div>
+            <div class="control-row single">
+              <div>
+                <label for="draw-arc-label-padding">背景の余白(px)</label>
+                <input id="draw-arc-label-padding" type="number" min="0" max="20" value="4">
+              </div>
+            </div>
           </div>
           <div class="inline-row draw-tools">
             <button class="draw-tool active" data-tool="curve" type="button">曲線</button>
@@ -635,6 +652,23 @@
                 <div>
                   <label for="ins-draw-arc-label-size">弧の文字サイズ</label>
                   <input id="ins-draw-arc-label-size" type="number" min="8" max="48" data-field="arcLabelSize">
+                </div>
+              </div>
+              <label class="pill"><input id="ins-draw-arc-label-bg-enabled" type="checkbox" data-field="arcLabelBgEnabled"> 文字背景を表示</label>
+              <div class="control-row">
+                <div>
+                  <label for="ins-draw-arc-label-bg-color">背景色</label>
+                  <input id="ins-draw-arc-label-bg-color" type="color" data-field="arcLabelBgColor">
+                </div>
+                <div>
+                  <label for="ins-draw-arc-label-bg-opacity">背景の濃さ</label>
+                  <input id="ins-draw-arc-label-bg-opacity" type="number" min="0" max="1" step="0.05" data-field="arcLabelBgOpacity">
+                </div>
+              </div>
+              <div class="control-row single">
+                <div>
+                  <label for="ins-draw-arc-label-padding">背景の余白(px)</label>
+                  <input id="ins-draw-arc-label-padding" type="number" min="0" max="20" data-field="arcLabelPadding">
                 </div>
               </div>
             </div>

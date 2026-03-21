@@ -402,7 +402,11 @@
               : (item.drawKind === 'bar'),
             arcLabel: item.arcLabel || '',
             arcLabelColor: item.arcLabelColor || item.strokeColor || '#1b1b1b',
-            arcLabelSize: typeof item.arcLabelSize === 'number' ? item.arcLabelSize : 14
+            arcLabelSize: typeof item.arcLabelSize === 'number' ? item.arcLabelSize : 14,
+            arcLabelBgEnabled: typeof item.arcLabelBgEnabled === 'boolean' ? item.arcLabelBgEnabled : false,
+            arcLabelBgColor: item.arcLabelBgColor || '#ffffff',
+            arcLabelBgOpacity: typeof item.arcLabelBgOpacity === 'number' ? item.arcLabelBgOpacity : 0.85,
+            arcLabelPadding: typeof item.arcLabelPadding === 'number' ? item.arcLabelPadding : 4
           })) : []
         }))
       : base.pages;
@@ -984,8 +988,32 @@
               const t = 0.5;
               const x = (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * pc.x + t * t * p1.x;
               const y = (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * pc.y + t * t * p1.y;
-              const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
               const size = typeof item.arcLabelSize === 'number' ? item.arcLabelSize : 14;
+              const pad = typeof item.arcLabelPadding === 'number' ? item.arcLabelPadding : 4;
+              const calcUnits = (text) => {
+                let units = 0;
+                for (const ch of String(text)) {
+                  const code = ch.charCodeAt(0);
+                  units += code > 255 ? 1 : 0.6;
+                }
+                return units || 1;
+              };
+              if (item.arcLabelBgEnabled) {
+                const textW = calcUnits(labelText) * size;
+                const textH = size * 1.2;
+                const bgW = textW + pad * 2;
+                const bgH = textH + pad * 2;
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', x - bgW / 2);
+                rect.setAttribute('y', y - bgH / 2);
+                rect.setAttribute('width', bgW);
+                rect.setAttribute('height', bgH);
+                rect.setAttribute('rx', Math.min(8, bgH / 2));
+                rect.setAttribute('fill', item.arcLabelBgColor || '#ffffff');
+                rect.setAttribute('fill-opacity', clamp(item.arcLabelBgOpacity ?? 0.85, 0, 1));
+                svg.appendChild(rect);
+              }
+              const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
               text.setAttribute('x', x);
               text.setAttribute('y', y);
               text.setAttribute('text-anchor', 'middle');
@@ -1260,6 +1288,10 @@
           $('#ins-draw-arc-label').value = item.arcLabel || '';
           $('#ins-draw-arc-label-color').value = item.arcLabelColor || '#1b1b1b';
           $('#ins-draw-arc-label-size').value = typeof item.arcLabelSize === 'number' ? item.arcLabelSize : 14;
+          $('#ins-draw-arc-label-bg-enabled').checked = !!item.arcLabelBgEnabled;
+          $('#ins-draw-arc-label-bg-color').value = item.arcLabelBgColor || '#ffffff';
+          $('#ins-draw-arc-label-bg-opacity').value = typeof item.arcLabelBgOpacity === 'number' ? item.arcLabelBgOpacity : 0.85;
+          $('#ins-draw-arc-label-padding').value = typeof item.arcLabelPadding === 'number' ? item.arcLabelPadding : 4;
         }
       }
     } else {
@@ -1478,7 +1510,11 @@
     fillEnabled: $('#draw-fill-enabled') ? $('#draw-fill-enabled').checked : false,
     arcLabel: $('#draw-arc-label') ? $('#draw-arc-label').value : '',
     arcLabelColor: $('#draw-arc-label-color') ? $('#draw-arc-label-color').value : '#1b1b1b',
-    arcLabelSize: parseFloat($('#draw-arc-label-size')?.value) || 14
+    arcLabelSize: parseFloat($('#draw-arc-label-size')?.value) || 14,
+    arcLabelBgEnabled: $('#draw-arc-label-bg-enabled') ? $('#draw-arc-label-bg-enabled').checked : false,
+    arcLabelBgColor: $('#draw-arc-label-bg-color') ? $('#draw-arc-label-bg-color').value : '#ffffff',
+    arcLabelBgOpacity: clamp(parseFloat($('#draw-arc-label-bg-opacity')?.value) || 0, 0, 1),
+    arcLabelPadding: clamp(parseFloat($('#draw-arc-label-padding')?.value) || 0, 0, 20)
   });
 
   const getEmojiTarget = () => {
@@ -1604,10 +1640,13 @@
   ]);
   const MATH_FIELDS = new Set(['latex','mathColor','mathBold','mathItalic','mathUnderline','mathSize']);
   const DRAW_FIELDS = new Set([
-    'strokeColor','strokeWidth','fillColor','fillOpacity','fillEnabled','arcLabel','arcLabelColor','arcLabelSize'
+    'strokeColor','strokeWidth','fillColor','fillOpacity','fillEnabled',
+    'arcLabel','arcLabelColor','arcLabelSize',
+    'arcLabelBgEnabled','arcLabelBgColor','arcLabelBgOpacity','arcLabelPadding'
   ]);
   const NUM_FIELDS = new Set([
-    'x','y','w','h','rotation','opacity','fontSize','borderWidth','lineHeight','strokeWidth','fillOpacity','mathSize','textCombineDigits','arcLabelSize'
+    'x','y','w','h','rotation','opacity','fontSize','borderWidth','lineHeight','strokeWidth','fillOpacity','mathSize','textCombineDigits',
+    'arcLabelSize','arcLabelBgOpacity','arcLabelPadding'
   ]);
   const CLAMP_0_1_FIELDS = new Set(['opacity','fillOpacity']);
   const addTextItem = (kind) => {
@@ -2305,7 +2344,11 @@
       fillEnabled: style.fillEnabled,
       arcLabel: style.arcLabel || '',
       arcLabelColor: style.arcLabelColor || style.strokeColor,
-      arcLabelSize: typeof style.arcLabelSize === 'number' ? style.arcLabelSize : 14
+      arcLabelSize: typeof style.arcLabelSize === 'number' ? style.arcLabelSize : 14,
+      arcLabelBgEnabled: !!style.arcLabelBgEnabled,
+      arcLabelBgColor: style.arcLabelBgColor || '#ffffff',
+      arcLabelBgOpacity: typeof style.arcLabelBgOpacity === 'number' ? style.arcLabelBgOpacity : 0.85,
+      arcLabelPadding: typeof style.arcLabelPadding === 'number' ? style.arcLabelPadding : 4
     });
 
     if (tool === 'curve') {
