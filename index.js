@@ -9,7 +9,6 @@
   const HISTORY_LIMIT = 40;
   const FULLSCREEN_CLASS = 'fullscreen-preview';
   const GRID_KINDS = new Set(['tile', 'dot', 'array', 'ohajiki', 'bead', 'grid']);
-  const SPRITE_MASK_ENABLED = window.location.protocol !== 'file:';
   let saveTimer = null;
   let saveRetryAt = 0;
   let saveFailNotified = false;
@@ -1834,8 +1833,6 @@
     const width = cols * cell + (cols - 1) * effectiveGap + pad * 2;
     const height = rows * cell + (rows - 1) * effectiveGap + pad * 2;
     let parts = '';
-    let defs = '';
-    let spriteIndex = 0;
 
     if (kind === 'grid') {
       const gridWidth = cols * cell;
@@ -1877,16 +1874,7 @@
           const imgX = x + offset;
           const imgY = y + offset;
           if (sprite) {
-            if (SPRITE_MASK_ENABLED) {
-              const id = `sprite_${kind}_${spriteIndex}`;
-              spriteIndex += 1;
-              defs += `<mask id="${id}" maskUnits="userSpaceOnUse" mask-type="alpha">` +
-                `<image href="${sprite}" x="${imgX}" y="${imgY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />` +
-                `</mask>`;
-              parts += `<rect x="${imgX}" y="${imgY}" width="${size}" height="${size}" fill="${fill}" mask="url(#${id})" />`;
-            } else {
-              parts += `<image href="${sprite}" x="${imgX}" y="${imgY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />`;
-            }
+            parts += `<image href="${sprite}" x="${imgX}" y="${imgY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />`;
           } else {
             const radius = cell * 0.45;
             const cx = x + cell / 2;
@@ -1899,8 +1887,7 @@
         }
       }
     }
-    const content = defs ? `<defs>${defs}</defs>${parts}` : parts;
-    const svg = svgWrap(width, height, content);
+    const svg = svgWrap(width, height, parts);
     return { svg, width, height };
   };
 
@@ -1966,7 +1953,8 @@
     state.pages.forEach((page) => {
       page.items.forEach((item) => {
         if (item.type !== 'svg' || !GRID_KINDS.has(item.svgKind)) return;
-        const needsSpriteRebuild = !SPRITE_MASK_ENABLED && (item.svgKind === 'ohajiki' || item.svgKind === 'bead');
+        const isSprite = item.svgKind === 'ohajiki' || item.svgKind === 'bead';
+        const needsSpriteRebuild = isSprite && (!item.svg || /<mask\b|mask=/.test(item.svg));
         if (item.svgKind === 'array' || item.svgKind === 'grid' || needsSpriteRebuild || !item.svg) {
           rebuildGridSvg(item);
           changed = true;
