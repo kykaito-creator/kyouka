@@ -4,11 +4,22 @@
   const STORAGE_KEY = 'textbook_maker_state_v3';
   const LAYOUT_KEY = 'textbook_maker_layout_v3';
   const MIN_PANEL = 240;
-  const MAX_PANEL = 520;
+  const MAX_PANEL = 720;
+  const COLLAPSED_WIDTH = 52;
+  const HISTORY_LIMIT = 40;
+  const FULLSCREEN_CLASS = 'fullscreen-preview';
   let saveTimer = null;
+  let saveRetryAt = 0;
+  let saveFailNotified = false;
+  let persistLayout = () => {};
+  let previewFullscreen = false;
 
   const uid = (prefix = 'id') => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
   const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+  const normalizeCombineDigits = (value) => {
+    const parsed = parseInt(value, 10);
+    return parsed === 3 ? 3 : 2;
+  };
   const isTransparent = (value) => {
     if (!value) return true;
     const v = String(value).toLowerCase().trim();
@@ -24,6 +35,143 @@
     const g = parseInt(raw.slice(2, 4), 16);
     const b = parseInt(raw.slice(4, 6), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
+  const TOAST_DURATION = 2400;
+  const showToast = (message, type = 'info') => {
+    const root = $('#toast-root');
+    if (!root) return;
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    root.appendChild(toast);
+    window.setTimeout(() => {
+      toast.classList.add('hide');
+      toast.addEventListener('animationend', () => toast.remove(), { once: true });
+    }, TOAST_DURATION);
+  };
+
+  const showContextMenu = (x, y) => {
+    const menu = $('#context-menu');
+    if (!menu) return;
+    menu.classList.add('open');
+    menu.setAttribute('aria-hidden', 'false');
+    const rect = menu.getBoundingClientRect();
+    const nextX = clamp(x, 8, window.innerWidth - rect.width - 8);
+    const nextY = clamp(y, 8, window.innerHeight - rect.height - 8);
+    menu.style.left = `${nextX}px`;
+    menu.style.top = `${nextY}px`;
+  };
+
+  const hideContextMenu = () => {
+    const menu = $('#context-menu');
+    if (!menu) return;
+    menu.classList.remove('open');
+    menu.setAttribute('aria-hidden', 'true');
+  };
+
+  const downloadBackup = (reason = 'backup') => {
+    const safeReason = String(reason || 'backup').replace(/[^a-z0-9_-]+/gi, '-');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `textbook_project_${safeReason}_${stamp}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  let renderQueued = false;
+  const pendingRender = { pages: false, inspector: false, layers: false };
+  const scheduleRender = (opts = {}) => {
+    if (opts.pages) pendingRender.pages = true;
+    if (opts.inspector) pendingRender.inspector = true;
+    if (opts.layers) pendingRender.layers = true;
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(() => {
+      renderQueued = false;
+      if (pendingRender.pages) renderPages();
+      if (pendingRender.inspector) renderInspector();
+      if (pendingRender.layers) renderLayers();
+      pendingRender.pages = false;
+      pendingRender.inspector = false;
+      pendingRender.layers = false;
+    });
+  };
+
+  let gridSizeCache = null;
+  const getGridSize = () => {
+    if (gridSizeCache) return gridSizeCache;
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--grid-size');
+    const parsed = parseFloat(raw);
+    gridSizeCache = Number.isFinite(parsed) && parsed > 0 ? parsed : 14;
+    return gridSizeCache;
+  };
+  const snapValue = (value) => {
+    const size = getGridSize();
+    return Math.round(value / size) * size;
+  };
+
+  const history = { stack: [], index: -1 };
+  let historyTimer = null;
+  let historyLocked = false;
+
+  const updateHistoryButtons = () => {
+    const undoBtn = $('#undo');
+    const redoBtn = $('#redo');
+    if (undoBtn) undoBtn.disabled = history.index <= 0;
+    if (redoBtn) redoBtn.disabled = history.index >= history.stack.length - 1;
+  };
+
+  const pushHistory = (force = false) => {
+    if (historyLocked) return;
+    const snap = JSON.stringify(state);
+    const current = history.stack[history.index];
+    if (!force && current === snap) return;
+    if (history.index < history.stack.length - 1) {
+      history.stack = history.stack.slice(0, history.index + 1);
+    }
+    history.stack.push(snap);
+    if (history.stack.length > HISTORY_LIMIT) {
+      history.stack.shift();
+    }
+    history.index = history.stack.length - 1;
+    updateHistoryButtons();
+  };
+
+  const scheduleHistoryPush = () => {
+    clearTimeout(historyTimer);
+    historyTimer = setTimeout(() => pushHistory(), 300);
+  };
+
+  const restoreHistory = (nextIndex) => {
+    if (nextIndex < 0 || nextIndex >= history.stack.length) return;
+    historyLocked = true;
+    state = normalizeState(JSON.parse(history.stack[nextIndex]));
+    history.index = nextIndex;
+    historyLocked = false;
+    renderAll();
+    typesetAllMath();
+    scheduleSave();
+    updateHistoryButtons();
+  };
+
+  const undo = () => {
+    if (history.index <= 0) return;
+    restoreHistory(history.index - 1);
+  };
+
+  const redo = () => {
+    if (history.index >= history.stack.length - 1) return;
+    restoreHistory(history.index + 1);
+  };
+
+  const resetHistory = () => {
+    history.stack = [];
+    history.index = -1;
+    pushHistory(true);
   };
 
   const createPage = (index = 1) => ({
@@ -48,11 +196,46 @@
     bold: style.bold,
     underline: style.underline,
     italic: style.italic,
+    vertical: !!style.vertical,
+    textOrientation: style.textOrientation || 'mixed',
+    textCombine: !!style.textCombine,
+    textCombineDigits: normalizeCombineDigits(style.textCombineDigits),
     color: style.color,
     bgColor: style.bgColor,
     bgTransparent: !!style.bgTransparent,
     borderColor: style.borderColor,
     borderWidth: style.borderWidth,
+    borderStyle: style.borderStyle || 'solid',
+    textAlign: style.textAlign,
+    lineHeight: style.lineHeight
+  });
+
+  const createRichTextItem = (html, style) => ({
+    id: uid('item'),
+    type: 'richtext',
+    kind: 'richtext',
+    richHtml: html,
+    x: 40,
+    y: 60,
+    w: 360,
+    h: 180,
+    rotation: 0,
+    opacity: 1,
+    fontFamily: style.fontFamily,
+    fontSize: style.fontSize,
+    bold: style.bold,
+    underline: style.underline,
+    italic: style.italic,
+    vertical: !!style.vertical,
+    textOrientation: style.textOrientation || 'mixed',
+    textCombine: !!style.textCombine,
+    textCombineDigits: normalizeCombineDigits(style.textCombineDigits),
+    color: style.color,
+    bgColor: style.bgColor,
+    bgTransparent: !!style.bgTransparent,
+    borderColor: style.borderColor,
+    borderWidth: style.borderWidth,
+    borderStyle: style.borderStyle || 'solid',
     textAlign: style.textAlign,
     lineHeight: style.lineHeight
   });
@@ -85,13 +268,44 @@
     opacity: 1
   });
 
+  const createSvgItem = (svg, width, height, kind = 'diagram') => ({
+    id: uid('item'),
+    type: 'svg',
+    svg,
+    svgKind: kind,
+    x: 60,
+    y: 80,
+    w: width,
+    h: height,
+    rotation: 0,
+    opacity: 1
+  });
+
+  const createMathItem = (latex, style = {}) => ({
+    id: uid('item'),
+    type: 'math',
+    latex,
+    mathSvg: '',
+    mathColor: style.mathColor || '#1b1b1b',
+    mathBold: !!style.mathBold,
+    mathItalic: !!style.mathItalic,
+    mathUnderline: !!style.mathUnderline,
+    mathSize: typeof style.mathSize === 'number' ? style.mathSize : 24,
+    x: 60,
+    y: 80,
+    w: 240,
+    h: 100,
+    rotation: 0,
+    opacity: 1
+  });
+
   const defaultState = () => ({
     project: { title: '', subject: '', grade: '', author: '' },
     pages: [createPage(1)],
     selectedPageId: null,
     selectedItemId: null,
     selectedItemIds: [],
-    view: { mode: 'continuous', showGrid: true, zoom: 1, drawMode: false, drawTool: 'curve' },
+    view: { mode: 'continuous', showGrid: true, zoom: 1, drawMode: false, drawTool: 'curve', snap: true, pageSize: 'A4-P', pageTurn: 'ltr' },
     support: { glossary: [], citations: [], checklist: [] }
   });
 
@@ -112,6 +326,7 @@
             type: item.type || 'text',
             kind: item.kind || 'text',
             text: item.text || '',
+            richHtml: item.richHtml || '',
             x: typeof item.x === 'number' ? item.x : 40,
             y: typeof item.y === 'number' ? item.y : 60,
             w: typeof item.w === 'number' ? item.w : 200,
@@ -123,15 +338,29 @@
             bold: !!item.bold,
             underline: !!item.underline,
             italic: !!item.italic,
+            vertical: !!item.vertical,
+            textOrientation: item.textOrientation || 'mixed',
+            textCombine: !!item.textCombine,
+            textCombineDigits: normalizeCombineDigits(item.textCombineDigits),
             color: item.color || '#1b1b1b',
             bgColor: item.bgColor && String(item.bgColor).startsWith('#') ? item.bgColor : '#ffffff',
             bgTransparent: typeof item.bgTransparent === 'boolean' ? item.bgTransparent : isTransparent(item.bgColor),
             borderColor: item.borderColor || '#111111',
             borderWidth: typeof item.borderWidth === 'number' ? item.borderWidth : 0,
+            borderStyle: item.borderStyle || 'solid',
             textAlign: item.textAlign || 'left',
             lineHeight: typeof item.lineHeight === 'number' ? item.lineHeight : 1.5,
             shape: item.shape || 'rect',
             src: item.src || '',
+            latex: item.latex || '',
+            mathSvg: item.mathSvg || '',
+            mathColor: item.mathColor || '#1b1b1b',
+            mathBold: !!item.mathBold,
+            mathItalic: !!item.mathItalic,
+            mathUnderline: !!item.mathUnderline,
+            mathSize: typeof item.mathSize === 'number' ? item.mathSize : 24,
+            svg: item.svg || '',
+            svgKind: item.svgKind || 'diagram',
             points: Array.isArray(item.points) ? item.points.map(pt => ({
               x: typeof pt.x === 'number' ? pt.x : 0,
               y: typeof pt.y === 'number' ? pt.y : 0
@@ -158,18 +387,38 @@
     return base;
   };
 
-  const saveLocal = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const saveLocal = (options = {}) => {
+    const { force = false, silentBackup = true } = options;
+    if (!force && saveRetryAt && Date.now() < saveRetryAt) return false;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      saveFailNotified = false;
+      saveRetryAt = 0;
+      return true;
+    } catch (err) {
+      console.warn('保存に失敗しました。', err);
+      saveRetryAt = Date.now() + 3000;
+      if (!saveFailNotified) {
+        showToast('保存に失敗しました。容量超過の可能性があります。JSON書き出しをおすすめします。', 'danger');
+        saveFailNotified = true;
+        if (!silentBackup) {
+          downloadBackup('backup');
+          showToast('バックアップJSONを保存しました。', 'success');
+        }
+      }
+      return false;
+    }
   };
 
   const scheduleSave = () => {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveLocal, 300);
+    saveTimer = setTimeout(() => saveLocal({ silentBackup: true }), 300);
   };
 
-  const loadLocal = () => {
+  const loadLocal = (options = {}) => {
+    const { silent = false } = options;
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return false;
+    if (!raw) return null;
     try {
       state = normalizeState(JSON.parse(raw));
       if (!state.selectedPageId && state.pages.length) {
@@ -178,6 +427,9 @@
       return true;
     } catch (err) {
       console.error('読み込みに失敗しました。', err);
+      if (!silent) {
+        showToast('読み込みに失敗しました。', 'danger');
+      }
       return false;
     }
   };
@@ -212,11 +464,48 @@
     return null;
   };
 
+  const getSelectedItemsOnPage = () => {
+    const page = getSelectedPage();
+    if (!page) return [];
+    const ids = new Set(getSelectedItemIds());
+    return page.items.filter(item => ids.has(item.id));
+  };
+
   const updateProjectFields = () => {
     $('#book-title').value = state.project.title;
     $('#book-subject').value = state.project.subject;
     $('#book-grade').value = state.project.grade;
     $('#book-author').value = state.project.author;
+  };
+
+  const updateFullscreenButton = () => {
+    const btn = $('#toggle-fullscreen');
+    if (!btn) return;
+    btn.textContent = previewFullscreen ? '全画面を終了' : '全画面プレビュー';
+  };
+
+  const setPreviewFullscreen = (enabled) => {
+    previewFullscreen = !!enabled;
+    document.body.classList.toggle(FULLSCREEN_CLASS, previewFullscreen);
+    updateFullscreenButton();
+  };
+
+  const togglePreviewFullscreen = () => {
+    const next = !previewFullscreen;
+    setPreviewFullscreen(next);
+    if (next) {
+      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        const result = document.documentElement.requestFullscreen();
+        if (result && typeof result.catch === 'function') {
+          result.catch(() => {});
+        }
+      }
+    } else if (document.fullscreenElement && document.exitFullscreen) {
+      const result = document.exitFullscreen();
+      if (result && typeof result.catch === 'function') {
+        result.catch(() => {});
+      }
+    }
   };
 
   const updateView = () => {
@@ -226,6 +515,14 @@
     container.style.setProperty('--zoom', state.view.zoom);
     $('#toggle-view').textContent = `見開き: ${state.view.mode === 'spread' ? 'ON' : 'OFF'}`;
     $('#toggle-grid').textContent = `グリッド: ${state.view.showGrid ? 'ON' : 'OFF'}`;
+    const pageTurnBtn = $('#toggle-page-turn');
+    if (pageTurnBtn) {
+      pageTurnBtn.textContent = `ページ送り: ${state.view.pageTurn === 'rtl' ? '左' : '右'}`;
+    }
+    const snapBtn = $('#toggle-snap');
+    if (snapBtn) {
+      snapBtn.textContent = `スナップ: ${state.view.snap ? 'ON' : 'OFF'}`;
+    }
     $('#zoom-range').value = state.view.zoom;
     const drawToggle = $('#draw-toggle');
     if (drawToggle) {
@@ -234,6 +531,32 @@
     $$('.draw-tool').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === state.view.drawTool);
     });
+    updateFullscreenButton();
+  };
+
+  const PAGE_SIZES = {
+    'A4-P': { w: 210, h: 297, unit: 'mm' },
+    'A4-L': { w: 297, h: 210, unit: 'mm' },
+    'A3-P': { w: 297, h: 420, unit: 'mm' },
+    'A3-L': { w: 420, h: 297, unit: 'mm' },
+    'A5-P': { w: 148, h: 210, unit: 'mm' },
+    'A5-L': { w: 210, h: 148, unit: 'mm' },
+    'B5-P': { w: 182, h: 257, unit: 'mm' },
+    'B5-L': { w: 257, h: 182, unit: 'mm' },
+    'Letter-P': { w: 8.5, h: 11, unit: 'in' },
+    'Letter-L': { w: 11, h: 8.5, unit: 'in' },
+    'Legal-P': { w: 8.5, h: 14, unit: 'in' },
+    'Legal-L': { w: 14, h: 8.5, unit: 'in' },
+    'Tabloid-P': { w: 11, h: 17, unit: 'in' },
+    'Tabloid-L': { w: 17, h: 11, unit: 'in' }
+  };
+
+  const applyPageSize = (key) => {
+    const size = PAGE_SIZES[key] || PAGE_SIZES['A4-P'];
+    const w = `${size.w}${size.unit}`;
+    const h = `${size.h}${size.unit}`;
+    document.documentElement.style.setProperty('--page-w', w);
+    document.documentElement.style.setProperty('--page-h', h);
   };
 
   const renderPageSelect = () => {
@@ -255,15 +578,138 @@
     .replace(/\"/g, '&quot;')
     .replace(/'/g, '&#039;');
 
+  const htmlToPlainText = (html) => {
+    if (!html) return '';
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return (tmp.textContent || '').trim();
+  };
+
+  const isSafeColor = (value) => {
+    const v = String(value || '').trim();
+    if (!v) return false;
+    if (/^#[0-9a-f]{3}$/i.test(v)) return true;
+    if (/^#[0-9a-f]{6}$/i.test(v)) return true;
+    if (/^rgb(a)?\([0-9\s.,%]+\)$/i.test(v)) return true;
+    if (/^hsl(a)?\([0-9\s.,%]+\)$/i.test(v)) return true;
+    if (/^[a-z]+$/i.test(v)) return true;
+    return false;
+  };
+
+  const normalizeFontSize = (value) => {
+    const v = String(value || '').trim();
+    if (!v) return '';
+    const match = v.match(/^([0-9.]+)(px|pt|em|rem|%)$/i);
+    if (!match) return '';
+    const num = parseFloat(match[1]);
+    if (!Number.isFinite(num) || num <= 0) return '';
+    const unit = match[2].toLowerCase();
+    if (unit === 'pt') {
+      const px = Math.round(num * 1.333 * 10) / 10;
+      return `${px}px`;
+    }
+    return `${num}${unit}`;
+  };
+
+  const sanitizeStyleText = (styleText) => {
+    if (!styleText) return '';
+    const allowed = [];
+    styleText.split(';').forEach((raw) => {
+      const [propRaw, ...rest] = raw.split(':');
+      if (!propRaw || !rest.length) return;
+      const prop = propRaw.trim().toLowerCase();
+      const value = rest.join(':').trim();
+      if (!value) return;
+      if (prop === 'color' || prop === 'background-color') {
+        if (isSafeColor(value)) allowed.push(`${prop}: ${value}`);
+        return;
+      }
+      if (prop === 'font-size') {
+        const size = normalizeFontSize(value);
+        if (size) allowed.push(`${prop}: ${size}`);
+        return;
+      }
+      if (prop === 'font-weight') {
+        if (/^(normal|bold|[1-9]00)$/i.test(value)) {
+          allowed.push(`${prop}: ${value}`);
+        }
+        return;
+      }
+      if (prop === 'font-style') {
+        if (/^(normal|italic|oblique)$/i.test(value)) {
+          allowed.push(`${prop}: ${value}`);
+        }
+        return;
+      }
+      if (prop === 'text-decoration' || prop === 'text-decoration-line') {
+        const tokens = value.split(/\s+/).filter(Boolean);
+        const allowedTokens = tokens.filter(tok => ['underline','line-through','overline','none'].includes(tok.toLowerCase()));
+        if (allowedTokens.length) {
+          allowed.push(`text-decoration: ${allowedTokens.join(' ')}`);
+        }
+      }
+    });
+    return allowed.join('; ');
+  };
+
+  const sanitizeRichHtml = (html) => {
+    if (!html) return '';
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html');
+    const root = doc.body.firstChild;
+    const container = document.createElement('div');
+    const allowedTags = new Set(['SPAN', 'B', 'STRONG', 'I', 'EM', 'U', 'BR', 'P', 'DIV', 'SUP', 'SUB']);
+
+    const sanitizeNode = (node, parent) => {
+      if (!node) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        parent.appendChild(document.createTextNode(node.textContent));
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toUpperCase();
+      if (!allowedTags.has(tag)) {
+        node.childNodes.forEach(child => sanitizeNode(child, parent));
+        return;
+      }
+      const el = document.createElement(tag.toLowerCase());
+      if (tag !== 'BR') {
+        const style = sanitizeStyleText(node.getAttribute('style'));
+        if (style) el.setAttribute('style', style);
+        node.childNodes.forEach(child => sanitizeNode(child, el));
+      }
+      parent.appendChild(el);
+    };
+
+    if (root) {
+      root.childNodes.forEach(child => sanitizeNode(child, container));
+    }
+    return container.innerHTML;
+  };
+
+  const isRichTextEmpty = (html) => {
+    if (!html) return true;
+    const stripped = html
+      .replace(/<br\s*\/?>/gi, '')
+      .replace(/&nbsp;|&#160;/gi, '')
+      .replace(/\s+/g, '');
+    return stripped.length === 0;
+  };
+
   const applyTextStyles = (item, el) => {
     el.style.fontFamily = item.fontFamily;
     el.style.fontSize = `${item.fontSize}px`;
     el.style.fontWeight = item.bold ? '700' : '400';
     el.style.textDecoration = item.underline ? 'underline' : 'none';
     el.style.fontStyle = item.italic ? 'italic' : 'normal';
+    el.style.writingMode = item.vertical ? 'vertical-rl' : 'horizontal-tb';
+    el.style.textOrientation = item.vertical ? (item.textOrientation || 'mixed') : 'mixed';
+    const combineDigits = normalizeCombineDigits(item.textCombineDigits);
+    el.style.textCombineUpright = item.vertical && item.textCombine ? `digits ${combineDigits}` : 'none';
     el.style.color = item.color;
     el.style.background = item.bgTransparent ? 'transparent' : (item.bgColor || 'transparent');
-    el.style.border = item.borderWidth > 0 ? `${item.borderWidth}px solid ${item.borderColor}` : 'none';
+    const borderStyle = item.borderStyle || 'solid';
+    el.style.border = item.borderWidth > 0 ? `${item.borderWidth}px ${borderStyle} ${item.borderColor}` : 'none';
     el.style.textAlign = item.textAlign;
     el.style.lineHeight = item.lineHeight;
   };
@@ -320,6 +766,16 @@
           applyTextStyles(item, content);
           itemEl.appendChild(content);
           itemEl.addEventListener('dblclick', () => enableInlineEdit(item, content));
+        }
+
+        if (item.type === 'richtext') {
+          itemEl.classList.add('text', 'richtext');
+          const content = document.createElement('div');
+          content.className = 'item-content richtext-content';
+          content.innerHTML = sanitizeRichHtml(item.richHtml || '');
+          applyTextStyles(item, content);
+          itemEl.appendChild(content);
+          itemEl.addEventListener('dblclick', () => enableInlineRichEdit(item, content));
         }
 
         if (item.type === 'shape') {
@@ -447,7 +903,36 @@
           itemEl.appendChild(img);
         }
 
-        if (selectedIds.has(item.id) && item.type !== 'draw' && item.id === state.selectedItemId) {
+        if (item.type === 'math') {
+          const content = document.createElement('div');
+          content.className = 'math-content';
+          content.style.color = item.mathColor || '#1b1b1b';
+          const size = item.mathSize || 24;
+          const scale = size / 24;
+          if (scale !== 1) {
+            content.style.transform = `scale(${scale})`;
+            content.style.transformOrigin = 'center';
+          }
+          if (item.mathSvg) {
+            content.innerHTML = item.mathSvg;
+          } else if (item.latex) {
+            content.textContent = item.latex;
+            content.classList.add('muted');
+          } else {
+            content.textContent = '数式';
+            content.classList.add('muted');
+          }
+          itemEl.appendChild(content);
+        }
+
+        if (item.type === 'svg') {
+          const content = document.createElement('div');
+          content.className = 'svg-content';
+          content.innerHTML = item.svg || '';
+          itemEl.appendChild(content);
+        }
+
+        if (selectedIds.has(item.id) && item.id === state.selectedItemId) {
           ['nw','n','ne','e','se','s','sw','w'].forEach(dir => {
             const handle = document.createElement('div');
             handle.className = `resize-handle ${dir}`;
@@ -455,9 +940,22 @@
             handle.addEventListener('pointerdown', (e) => startResize(e, item, pageEl, dir));
             itemEl.appendChild(handle);
           });
+          const rotateHandle = document.createElement('div');
+          rotateHandle.className = 'rotate-handle';
+          rotateHandle.addEventListener('pointerdown', (e) => startRotate(e, item, pageEl));
+          itemEl.appendChild(rotateHandle);
         }
 
         itemEl.addEventListener('pointerdown', (e) => startDrag(e, item, pageEl));
+        itemEl.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          if (state.view.drawMode) return;
+          const ids = getSelectedItemIds();
+          if (!ids.includes(item.id)) {
+            selectItem(item.id);
+          }
+          showContextMenu(e.clientX, e.clientY);
+        });
         pageEl.appendChild(itemEl);
       });
 
@@ -494,11 +992,17 @@
       const label = document.createElement('div');
       const title = item.type === 'text'
         ? (item.text.slice(0, 14) || 'テキスト')
-        : (item.type === 'image'
-          ? '画像'
-          : (item.type === 'draw'
-            ? '描画'
-            : (item.shape === 'circle' ? '円形' : '長方形')));
+        : (item.type === 'richtext'
+          ? (htmlToPlainText(item.richHtml).slice(0, 14) || 'リッチテキスト')
+          : (item.type === 'image'
+            ? '画像'
+            : (item.type === 'math'
+              ? '数式'
+              : (item.type === 'svg'
+                ? '図'
+                : (item.type === 'draw'
+                  ? '描画'
+                  : (item.shape === 'circle' ? '円形' : '長方形'))))));
       label.textContent = title;
       const controls = document.createElement('div');
       controls.className = 'layer-controls';
@@ -557,19 +1061,39 @@
     $('#ins-op').value = item.opacity;
 
     const textTools = $('#inspector-text-tools');
-    if (item.type === 'text') {
+    const isTextLike = item.type === 'text' || item.type === 'richtext';
+    if (isTextLike) {
       textTools.style.display = 'block';
-      $('#ins-text').value = item.text;
+      const insText = $('#ins-text');
+      const richNote = $('#ins-richtext-note');
+      if (item.type === 'text') {
+        insText.disabled = false;
+        insText.value = item.text;
+        if (richNote) richNote.style.display = 'none';
+      } else {
+        insText.disabled = true;
+        insText.value = 'リッチテキストはプレビューで編集してください。';
+        if (richNote) richNote.style.display = 'block';
+      }
       $('#ins-font').value = item.fontFamily;
       $('#ins-font-size').value = item.fontSize;
-    $('#ins-bold').checked = item.bold;
-    $('#ins-underline').checked = item.underline;
-    $('#ins-italic').checked = item.italic;
-    $('#ins-color').value = item.color || '#1b1b1b';
-    $('#ins-bg').value = item.bgColor || '#ffffff';
-    $('#ins-bg-transparent').checked = !!item.bgTransparent;
-    $('#ins-border-color').value = item.borderColor || '#111111';
-    $('#ins-border-width').value = item.borderWidth || 0;
+      $('#ins-bold').checked = item.bold;
+      $('#ins-underline').checked = item.underline;
+      $('#ins-italic').checked = item.italic;
+      $('#ins-vertical').checked = !!item.vertical;
+      $('#ins-orientation').value = item.textOrientation || 'mixed';
+      $('#ins-combine').checked = !!item.textCombine;
+      const combineDigits = normalizeCombineDigits(item.textCombineDigits);
+      const insCombineDigits = $('#ins-combine-digits');
+      if (insCombineDigits) {
+        insCombineDigits.value = String(combineDigits);
+        insCombineDigits.disabled = !item.textCombine || !item.vertical;
+      }
+      $('#ins-color').value = item.color || '#1b1b1b';
+      $('#ins-bg').value = item.bgColor || '#ffffff';
+      $('#ins-bg-transparent').checked = !!item.bgTransparent;
+      $('#ins-border-color').value = item.borderColor || '#111111';
+      $('#ins-border-width').value = item.borderWidth || 0;
       $('#ins-align').value = item.textAlign || 'left';
       $('#ins-line').value = item.lineHeight || 1.5;
     } else {
@@ -589,6 +1113,19 @@
     } else {
       drawTools.style.display = 'none';
     }
+
+    const mathTools = $('#inspector-math-tools');
+    if (item.type === 'math') {
+      mathTools.style.display = 'block';
+      $('#ins-latex').value = item.latex || '';
+      $('#ins-math-color').value = item.mathColor || '#1b1b1b';
+      $('#ins-math-size').value = item.mathSize || 24;
+      $('#ins-math-bold').checked = !!item.mathBold;
+      $('#ins-math-underline').checked = !!item.mathUnderline;
+      $('#ins-math-italic').checked = !!item.mathItalic;
+    } else {
+      mathTools.style.display = 'none';
+    }
   };
 
   const renderSupport = () => {
@@ -604,6 +1141,7 @@
         state.support.glossary.splice(index, 1);
         renderSupport();
         scheduleSave();
+        pushHistory();
       });
       row.appendChild(del);
       glossary.appendChild(row);
@@ -621,6 +1159,7 @@
         state.support.citations.splice(index, 1);
         renderSupport();
         scheduleSave();
+        pushHistory();
       });
       row.appendChild(del);
       citations.appendChild(row);
@@ -639,6 +1178,7 @@
       checkbox.addEventListener('change', () => {
         item.done = checkbox.checked;
         scheduleSave();
+        scheduleHistoryPush();
       });
       const span = document.createElement('span');
       span.textContent = item.text;
@@ -650,6 +1190,7 @@
         state.support.checklist.splice(index, 1);
         renderSupport();
         scheduleSave();
+        pushHistory();
       });
       row.appendChild(label);
       row.appendChild(del);
@@ -660,11 +1201,19 @@
   const renderAll = () => {
     updateProjectFields();
     updateView();
+    applyPageSize(state.view.pageSize);
     renderPageSelect();
     renderPages();
     renderLayers();
     renderInspector();
     renderSupport();
+  };
+
+  const getNextPageIndex = (currentIndex, direction) => {
+    const delta = direction === 'next'
+      ? (state.view.pageTurn === 'rtl' ? -1 : 1)
+      : (state.view.pageTurn === 'rtl' ? 1 : -1);
+    return currentIndex + delta;
   };
 
   const setSelectedItemIds = (ids) => {
@@ -705,11 +1254,15 @@
     state.selectedPageId = newPage.id;
     renderAll();
     scheduleSave();
+    pushHistory();
   };
 
   const deletePage = () => {
     if (state.pages.length <= 1) {
-      alert('最低1ページは必要です。');
+      showToast('最低1ページは必要です。', 'danger');
+      return;
+    }
+    if (!confirm('このページを削除しますか？この操作は元に戻せません。')) {
       return;
     }
     const idx = state.pages.findIndex(p => p.id === state.selectedPageId);
@@ -720,6 +1273,7 @@
     state.selectedItemId = null;
     renderAll();
     scheduleSave();
+    pushHistory();
   };
 
   const getInsertionStyle = () => ({
@@ -728,13 +1282,26 @@
     bold: $('#font-bold').checked,
     underline: $('#font-underline').checked,
     italic: $('#font-italic').checked,
+    vertical: $('#font-vertical')?.checked ?? false,
+    textOrientation: $('#font-orientation')?.value || 'mixed',
+    textCombine: $('#font-combine')?.checked ?? false,
+    textCombineDigits: normalizeCombineDigits($('#font-combine-digits')?.value),
     color: $('#font-color').value,
     bgColor: $('#bg-color').value,
     bgTransparent: $('#bg-transparent')?.checked ?? true,
     borderColor: $('#border-color').value,
     borderWidth: parseInt($('#border-width').value, 10) || 0,
+    borderStyle: 'solid',
     textAlign: $('#text-align').value,
     lineHeight: parseFloat($('#line-height').value) || 1.5
+  });
+
+  const getMathStyle = () => ({
+    mathColor: $('#math-color') ? $('#math-color').value : '#1b1b1b',
+    mathBold: $('#math-bold') ? $('#math-bold').checked : false,
+    mathItalic: $('#math-italic') ? $('#math-italic').checked : false,
+    mathUnderline: $('#math-underline') ? $('#math-underline').checked : false,
+    mathSize: parseInt($('#math-size')?.value, 10) || 24
   });
 
   const getDrawStyle = () => ({
@@ -768,20 +1335,110 @@
     target.focus();
   };
 
+  const insertTemplate = (inputEl, template) => {
+    if (!inputEl) return;
+    const start = typeof inputEl.selectionStart === 'number' ? inputEl.selectionStart : inputEl.value.length;
+    const end = typeof inputEl.selectionEnd === 'number' ? inputEl.selectionEnd : inputEl.value.length;
+    if (typeof inputEl.setRangeText === 'function') {
+      inputEl.setRangeText(template, start, end, 'end');
+      const braceIndex = template.indexOf('{');
+      if (braceIndex !== -1) {
+        const pos = start + braceIndex + 1;
+        inputEl.setSelectionRange(pos, pos);
+      }
+    } else {
+      inputEl.value = `${inputEl.value}${template}`;
+    }
+    inputEl.focus();
+  };
+
+  const normalizeRichTextInput = (inputEl) => {
+    if (!inputEl) return;
+    const text = inputEl.innerText.replace(/\u200B/g, '').trim();
+    if (!text) {
+      inputEl.innerHTML = '';
+    }
+  };
+
   const updateColorReadout = (swatchEl, codeEl, color) => {
     if (swatchEl && color) swatchEl.style.background = color;
     if (codeEl && color) codeEl.textContent = color;
   };
 
+  const mathTimers = new Map();
+  const ensureMathJaxReady = () => {
+    const mj = window.MathJax;
+    if (!mj || !mj.startup || !mj.tex2svgPromise) {
+      return Promise.reject(new Error('MathJax not available'));
+    }
+    return mj.startup.promise;
+  };
+
+  const buildMathLatex = (item) => {
+    let latex = (item.latex || '').trim();
+    if (!latex) return '';
+    if (item.mathBold) latex = `\\mathbf{${latex}}`;
+    if (item.mathItalic) latex = `\\mathit{${latex}}`;
+    if (item.mathUnderline) latex = `\\underline{${latex}}`;
+    return latex;
+  };
+
+  const typesetMathItem = async (item) => {
+    if (!item || item.type !== 'math') return;
+    const latex = buildMathLatex(item);
+    if (!latex) {
+      item.mathSvg = '';
+      scheduleRender({ pages: true });
+      scheduleSave();
+      return;
+    }
+    try {
+      await ensureMathJaxReady();
+      const mj = window.MathJax;
+      const node = await mj.tex2svgPromise(latex, { display: true });
+      const svg = node.querySelector('svg');
+      item.mathSvg = svg ? svg.outerHTML : '';
+      scheduleRender({ pages: true });
+      scheduleSave();
+    } catch (err) {
+      console.warn('数式の生成に失敗しました。', err);
+      showToast('数式の生成に失敗しました。', 'danger');
+    }
+  };
+
+  const scheduleMathTypeset = (item) => {
+    if (!item || item.type !== 'math') return;
+    const id = item.id;
+    if (mathTimers.has(id)) {
+      clearTimeout(mathTimers.get(id));
+    }
+    const timer = setTimeout(() => {
+      mathTimers.delete(id);
+      typesetMathItem(item);
+    }, 350);
+    mathTimers.set(id, timer);
+  };
+
+  const typesetAllMath = (force = false) => {
+    state.pages.forEach(page => {
+      page.items.forEach(item => {
+        if (item.type !== 'math') return;
+        if (!force && item.mathSvg) return;
+        typesetMathItem(item);
+      });
+    });
+  };
+
   const TEXT_FIELDS = new Set([
-    'text','fontFamily','fontSize','bold','underline','italic','color',
+    'text','fontFamily','fontSize','bold','underline','italic','vertical','textOrientation','textCombine','textCombineDigits','color',
     'bgColor','bgTransparent','borderColor','borderWidth','textAlign','lineHeight'
   ]);
+  const MATH_FIELDS = new Set(['latex','mathColor','mathBold','mathItalic','mathUnderline','mathSize']);
   const DRAW_FIELDS = new Set([
     'strokeColor','strokeWidth','fillColor','fillOpacity','fillEnabled'
   ]);
   const NUM_FIELDS = new Set([
-    'x','y','w','h','rotation','opacity','fontSize','borderWidth','lineHeight','strokeWidth','fillOpacity'
+    'x','y','w','h','rotation','opacity','fontSize','borderWidth','lineHeight','strokeWidth','fillOpacity','mathSize','textCombineDigits'
   ]);
   const CLAMP_0_1_FIELDS = new Set(['opacity','fillOpacity']);
   const addTextItem = (kind) => {
@@ -802,6 +1459,29 @@
     state.selectedItemId = item.id;
     renderAll();
     scheduleSave();
+    pushHistory();
+  };
+
+  const addRichTextItemFromInput = () => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const inputEl = $('#richtext-input');
+    if (!inputEl) return;
+    const rawHtml = inputEl.innerHTML || '';
+    const safeHtml = sanitizeRichHtml(rawHtml);
+    if (isRichTextEmpty(safeHtml)) {
+      showToast('リッチテキストが空です。', 'info');
+      return;
+    }
+    const style = getInsertionStyle();
+    const item = createRichTextItem(safeHtml, style);
+    page.items.push(item);
+    state.selectedItemIds = [item.id];
+    state.selectedItemId = item.id;
+    renderAll();
+    scheduleSave();
+    pushHistory();
+    inputEl.innerHTML = '';
   };
 
   const addShapeItem = (shape) => {
@@ -813,6 +1493,7 @@
     state.selectedItemId = item.id;
     renderAll();
     scheduleSave();
+    pushHistory();
   };
 
   const addImageItem = (src, dropPosition) => {
@@ -828,6 +1509,213 @@
     state.selectedItemId = item.id;
     renderAll();
     scheduleSave();
+    pushHistory();
+  };
+
+  const addMathItem = (latex) => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const text = (latex || '').trim() || '\\frac{a}{b}';
+    const style = getMathStyle();
+    const item = createMathItem(text, style);
+    item.w = Math.max(160, (style.mathSize || 24) * 6);
+    item.h = Math.max(60, (style.mathSize || 24) * 2.6);
+    page.items.push(item);
+    state.selectedItemIds = [item.id];
+    state.selectedItemId = item.id;
+    renderAll();
+    scheduleSave();
+    pushHistory();
+    typesetMathItem(item);
+  };
+
+  const TEMPLATE_PRESETS = {
+    goal: {
+      text: 'めあて\nここに学習のめあてを書く',
+      w: 380,
+      h: 140,
+      style: {
+        bgColor: '#fff5cc',
+        bgTransparent: false,
+        borderColor: '#f2b94b',
+        borderWidth: 2,
+        borderStyle: 'dashed',
+        fontSize: 20,
+        bold: true,
+        textAlign: 'left',
+        lineHeight: 1.4
+      }
+    },
+    summary: {
+      text: 'まとめ\nここにポイントを整理する',
+      w: 380,
+      h: 140,
+      style: {
+        bgColor: '#e8f4ff',
+        bgTransparent: false,
+        borderColor: '#4aa3ff',
+        borderWidth: 2,
+        borderStyle: 'solid',
+        fontSize: 20,
+        bold: true,
+        textAlign: 'left',
+        lineHeight: 1.4
+      }
+    },
+    question: {
+      text: '問い\nここに問いを書く',
+      w: 380,
+      h: 140,
+      style: {
+        bgColor: '#fff0f3',
+        bgTransparent: false,
+        borderColor: '#ff7aa2',
+        borderWidth: 2,
+        borderStyle: 'dotted',
+        fontSize: 20,
+        bold: true,
+        textAlign: 'left',
+        lineHeight: 1.4
+      }
+    }
+  };
+
+  const addTemplateItem = (key) => {
+    const preset = TEMPLATE_PRESETS[key];
+    if (!preset) return;
+    const page = getSelectedPage();
+    if (!page) return;
+    const base = getInsertionStyle();
+    const style = { ...base, ...preset.style };
+    const item = createTextItem(preset.text, style, 'text');
+    item.w = preset.w;
+    item.h = preset.h;
+    page.items.push(item);
+    state.selectedItemIds = [item.id];
+    state.selectedItemId = item.id;
+    renderAll();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const generateNumberLineSvg = (options) => {
+    const {
+      kind, min, max, step, length, lineColor, textColor
+    } = options;
+    const padding = 24;
+    const baseY = 40;
+    const ticks = Math.floor((max - min) / step);
+    const tickCount = Math.max(1, ticks);
+    const usable = Math.max(120, length);
+    const width = usable + padding * 2;
+    const height = kind === 'double' ? 120 : 90;
+    const lineY = baseY;
+    const secondY = baseY + 36;
+    const tickSize = 10;
+    let parts = '';
+
+    const drawLine = (y) => {
+      parts += `<line x1="${padding}" y1="${y}" x2="${padding + usable}" y2="${y}" stroke="${lineColor}" stroke-width="2" />`;
+    };
+
+    const drawTicks = (y, showLabels, labelOffset) => {
+      for (let i = 0; i <= tickCount; i += 1) {
+        const x = padding + (usable * i) / tickCount;
+        parts += `<line x1="${x}" y1="${y - tickSize / 2}" x2="${x}" y2="${y + tickSize / 2}" stroke="${lineColor}" stroke-width="2" />`;
+        if (showLabels) {
+          const value = min + step * i;
+          parts += `<text x="${x}" y="${y + labelOffset}" text-anchor="middle" font-size="12" fill="${textColor}">${value}</text>`;
+        }
+      }
+    };
+
+    if (kind === 'segment') {
+      drawLine(lineY);
+      parts += `<circle cx="${padding}" cy="${lineY}" r="4" fill="${lineColor}" />`;
+      parts += `<circle cx="${padding + usable}" cy="${lineY}" r="4" fill="${lineColor}" />`;
+      parts += `<text x="${padding}" y="${lineY - 12}" text-anchor="middle" font-size="12" fill="${textColor}">${min}</text>`;
+      parts += `<text x="${padding + usable}" y="${lineY - 12}" text-anchor="middle" font-size="12" fill="${textColor}">${max}</text>`;
+      parts += `<text x="${padding + usable / 2}" y="${lineY - 16}" text-anchor="middle" font-size="12" fill="${textColor}">${max - min}</text>`;
+    } else if (kind === 'double') {
+      drawLine(lineY);
+      drawLine(secondY);
+      drawTicks(lineY, true, 18);
+      drawTicks(secondY, true, 18);
+    } else if (kind === 'protractor') {
+      const radius = 120;
+      const cx = radius + 20;
+      const cy = radius + 20;
+      const widthP = radius * 2 + 40;
+      const heightP = radius + 40;
+      parts = '';
+      parts += `<path d="M ${cx - radius} ${cy} A ${radius} ${radius} 0 0 1 ${cx + radius} ${cy}" fill="none" stroke="${lineColor}" stroke-width="2" />`;
+      for (let angle = 0; angle <= 180; angle += 10) {
+        const theta = Math.PI - (angle * Math.PI / 180);
+        const x1 = cx + radius * Math.cos(theta);
+        const y1 = cy - radius * Math.sin(theta);
+        const x2 = cx + (radius - 10) * Math.cos(theta);
+        const y2 = cy - (radius - 10) * Math.sin(theta);
+        parts += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${lineColor}" stroke-width="2" />`;
+        const tx = cx + (radius - 26) * Math.cos(theta);
+        const ty = cy - (radius - 26) * Math.sin(theta);
+        parts += `<text x="${tx}" y="${ty}" text-anchor="middle" font-size="10" fill="${textColor}">${angle}</text>`;
+      }
+      const svg = svgWrap(widthP, heightP, parts);
+      return { svg, width: widthP, height: heightP };
+    } else {
+      drawLine(lineY);
+      drawTicks(lineY, true, 18);
+    }
+
+    const svg = svgWrap(width, height, parts);
+    return { svg, width, height };
+  };
+
+  const parseGridInput = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const normalized = raw.replace(/[×xX]/g, '*');
+    const match = normalized.match(/(\d+)\s*[*]\s*(\d+)/);
+    if (match) {
+      return { rows: parseInt(match[1], 10), cols: parseInt(match[2], 10) };
+    }
+    const single = normalized.match(/^\d+$/);
+    if (single) {
+      return { rows: 1, cols: parseInt(single[0], 10) };
+    }
+    return null;
+  };
+
+  const generateGridSvg = (options) => {
+    const {
+      rows, cols, cell, gap, kind, fill, stroke
+    } = options;
+    const pad = 12;
+    const width = cols * cell + (cols - 1) * gap + pad * 2;
+    const height = rows * cell + (rows - 1) * gap + pad * 2;
+    let parts = '';
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        const x = pad + c * (cell + gap);
+        const y = pad + r * (cell + gap);
+        if (kind === 'dot') {
+          const radius = Math.max(2, cell * 0.18);
+          const cx = x + cell / 2;
+          const cy = y + cell / 2;
+          parts += `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${fill}" />`;
+        } else if (kind === 'ohajiki' || kind === 'bead') {
+          const radius = cell * 0.45;
+          const cx = x + cell / 2;
+          const cy = y + cell / 2;
+          parts += `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`;
+        } else {
+          const fillColor = kind === 'array' ? 'transparent' : fill;
+          parts += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" fill="${fillColor}" stroke="${stroke}" stroke-width="2" rx="4" />`;
+        }
+      }
+    }
+    const svg = svgWrap(width, height, parts);
+    return { svg, width, height };
   };
 
   const moveLayer = (index, direction) => {
@@ -841,6 +1729,131 @@
     renderPages();
     renderLayers();
     scheduleSave();
+    pushHistory();
+  };
+
+  const alignItems = (mode) => {
+    const items = getSelectedItemsOnPage();
+    if (items.length < 2) {
+      showToast('2つ以上選択してください。', 'info');
+      return;
+    }
+    const minX = Math.min(...items.map(i => i.x));
+    const maxX = Math.max(...items.map(i => i.x + i.w));
+    const minY = Math.min(...items.map(i => i.y));
+    const maxY = Math.max(...items.map(i => i.y + i.h));
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    items.forEach(item => {
+      if (mode === 'left') item.x = minX;
+      if (mode === 'center') item.x = centerX - item.w / 2;
+      if (mode === 'right') item.x = maxX - item.w;
+      if (mode === 'top') item.y = minY;
+      if (mode === 'middle') item.y = centerY - item.h / 2;
+      if (mode === 'bottom') item.y = maxY - item.h;
+    });
+    renderPages();
+    renderInspector();
+    renderLayers();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const distributeItems = (axis) => {
+    const items = getSelectedItemsOnPage();
+    if (items.length < 3) {
+      showToast('3つ以上選択してください。', 'info');
+      return;
+    }
+    const sorted = [...items].sort((a, b) => axis === 'h' ? a.x - b.x : a.y - b.y);
+    const start = axis === 'h' ? sorted[0].x : sorted[0].y;
+    const end = axis === 'h'
+      ? Math.max(...sorted.map(i => i.x + i.w))
+      : Math.max(...sorted.map(i => i.y + i.h));
+    const total = sorted.reduce((sum, i) => sum + (axis === 'h' ? i.w : i.h), 0);
+    const gap = (end - start - total) / (sorted.length - 1);
+    let cursor = start;
+    sorted.forEach(item => {
+      if (axis === 'h') {
+        item.x = cursor;
+        cursor += item.w + gap;
+      } else {
+        item.y = cursor;
+        cursor += item.h + gap;
+      }
+    });
+    renderPages();
+    renderInspector();
+    renderLayers();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const cloneItem = (item, offset = 16) => {
+    const copy = JSON.parse(JSON.stringify(item));
+    copy.id = uid('item');
+    copy.x = (item.x || 0) + offset;
+    copy.y = (item.y || 0) + offset;
+    return copy;
+  };
+
+  const duplicateSelectedItems = () => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const items = getSelectedItemsOnPage();
+    if (!items.length) return;
+    const copies = items.map(item => cloneItem(item));
+    page.items.push(...copies);
+    state.selectedItemIds = copies.map(item => item.id);
+    state.selectedItemId = state.selectedItemIds[state.selectedItemIds.length - 1] || null;
+    renderAll();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const deleteSelectedItems = (confirmMulti = true) => {
+    const ids = new Set(getSelectedItemIds());
+    if (!ids.size) return;
+    if (confirmMulti && ids.size > 1 && !confirm('選択中の複数アイテムを削除しますか？')) {
+      return;
+    }
+    state.pages.forEach(p => {
+      p.items = p.items.filter(i => !ids.has(i.id));
+    });
+    state.selectedItemIds = [];
+    state.selectedItemId = null;
+    renderAll();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const bringSelectionToFront = () => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const ids = new Set(getSelectedItemIds());
+    if (!ids.size) return;
+    const selected = page.items.filter(i => ids.has(i.id));
+    page.items = page.items.filter(i => !ids.has(i.id)).concat(selected);
+    renderPages();
+    renderLayers();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const svgWrap = (width, height, inner) => (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="100%">${inner}</svg>`
+  );
+
+  const addSvgItem = (svg, width, height, kind) => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const item = createSvgItem(svg, width, height, kind);
+    page.items.push(item);
+    state.selectedItemIds = [item.id];
+    state.selectedItemId = item.id;
+    renderAll();
+    scheduleSave();
+    pushHistory();
   };
 
   const enableInlineEdit = (item, contentEl) => {
@@ -856,6 +1869,7 @@
       renderInspector();
       renderLayers();
       scheduleSave();
+      pushHistory();
     };
 
     const onBlur = () => {
@@ -863,6 +1877,66 @@
       finish();
     };
 
+    contentEl.addEventListener('blur', onBlur);
+  };
+
+  const insertHtmlAtCursor = (root, html) => {
+    root.focus();
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      root.innerHTML += html;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer)) {
+      root.innerHTML += html;
+      return;
+    }
+    range.deleteContents();
+    const frag = range.createContextualFragment(html);
+    range.insertNode(frag);
+    selection.removeAllRanges();
+    const newRange = document.createRange();
+    newRange.selectNodeContents(root);
+    newRange.collapse(false);
+    selection.addRange(newRange);
+  };
+
+  const enableInlineRichEdit = (item, contentEl) => {
+    if (item.type !== 'richtext') return;
+    contentEl.contentEditable = 'true';
+    contentEl.focus();
+    contentEl.parentElement.classList.add('editing');
+
+    const onPaste = (e) => {
+      e.preventDefault();
+      const html = e.clipboardData?.getData('text/html');
+      const text = e.clipboardData?.getData('text/plain');
+      const safe = html
+        ? sanitizeRichHtml(html)
+        : escapeHtml(text || '').replace(/\n/g, '<br>');
+      insertHtmlAtCursor(contentEl, safe);
+    };
+
+    const finish = () => {
+      const safeHtml = sanitizeRichHtml(contentEl.innerHTML);
+      item.richHtml = safeHtml;
+      contentEl.innerHTML = safeHtml;
+      contentEl.contentEditable = 'false';
+      contentEl.parentElement.classList.remove('editing');
+      renderInspector();
+      renderLayers();
+      scheduleSave();
+      pushHistory();
+    };
+
+    const onBlur = () => {
+      contentEl.removeEventListener('blur', onBlur);
+      contentEl.removeEventListener('paste', onPaste);
+      finish();
+    };
+
+    contentEl.addEventListener('paste', onPaste);
     contentEl.addEventListener('blur', onBlur);
   };
 
@@ -953,15 +2027,14 @@
         if ((dx * dx + dy * dy) < 1) return;
         last = pt;
         addPoint(pt);
-        renderPages();
-        renderInspector();
-        renderLayers();
+        scheduleRender({ pages: true, inspector: true, layers: true });
       };
 
       const onUp = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         scheduleSave();
+        pushHistory();
       };
 
       window.addEventListener('pointermove', onMove);
@@ -1047,15 +2120,14 @@
         ];
       }
 
-      renderPages();
-      renderInspector();
-      renderLayers();
+      scheduleRender({ pages: true, inspector: true, layers: true });
     };
 
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       scheduleSave();
+      pushHistory();
     };
 
     window.addEventListener('pointermove', onMove);
@@ -1065,7 +2137,7 @@
   const startDrag = (event, item, pageEl) => {
     if (state.view.drawMode) return;
     if (event.button !== 0) return;
-    if (event.target.classList.contains('resize-handle')) return;
+    if (event.target.classList.contains('resize-handle') || event.target.classList.contains('rotate-handle')) return;
     if (event.target.contentEditable === 'true') return;
     event.preventDefault();
     const multi = event.shiftKey || event.ctrlKey || event.metaKey;
@@ -1119,6 +2191,10 @@
       const scale = state.view.zoom || 1;
       let newX = (e.clientX - target.rect.left) / scale - start.offsetX;
       let newY = (e.clientY - target.rect.top) / scale - start.offsetY;
+      if (state.view.snap) {
+        newX = snapValue(newX);
+        newY = snapValue(newY);
+      }
 
       const pageW = target.rect.width / scale;
       const pageH = target.rect.height / scale;
@@ -1127,15 +2203,14 @@
       item.x = clamp(newX, 0, maxX);
       item.y = clamp(newY, 0, maxY);
 
-      renderPages();
-      renderInspector();
-      renderLayers();
+      scheduleRender({ pages: true, inspector: true, layers: true });
     };
 
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       scheduleSave();
+      pushHistory();
     };
 
     window.addEventListener('pointermove', onMove);
@@ -1170,19 +2245,57 @@
 
       newW = Math.max(30, newW);
       newH = Math.max(30, newH);
+      if (state.view.snap) {
+        newX = snapValue(newX);
+        newY = snapValue(newY);
+        newW = Math.max(30, snapValue(newW));
+        newH = Math.max(30, snapValue(newH));
+      }
 
       item.x = newX;
       item.y = newY;
       item.w = newW;
       item.h = newH;
-      renderPages();
-      renderInspector();
+      scheduleRender({ pages: true, inspector: true });
     };
 
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       scheduleSave();
+      pushHistory();
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const startRotate = (event, item, pageEl) => {
+    event.stopPropagation();
+    event.preventDefault();
+    const pageRect = (getPageById(pageEl.dataset.pageId)?.rect) || pageEl.getBoundingClientRect();
+    const scale = state.view.zoom || 1;
+    const centerX = pageRect.left + (item.x + item.w / 2) * scale;
+    const centerY = pageRect.top + (item.y + item.h / 2) * scale;
+    const startAngle = Math.atan2(event.clientY - centerY, event.clientX - centerX);
+    const startRotation = item.rotation || 0;
+
+    const onMove = (e) => {
+      const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+      let deg = startRotation + (angle - startAngle) * (180 / Math.PI);
+      if (e.shiftKey) {
+        const step = 15;
+        deg = Math.round(deg / step) * step;
+      }
+      item.rotation = Math.round(deg * 10) / 10;
+      scheduleRender({ pages: true, inspector: true });
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      scheduleSave();
+      pushHistory();
     };
 
     window.addEventListener('pointermove', onMove);
@@ -1207,6 +2320,24 @@
     return { pageId, rect: pageEl.getBoundingClientRect() };
   };
 
+  const setPanelCollapsed = (panel, collapsed) => {
+    if (!panel) return;
+    const isLeft = panel.id === 'left-panel';
+    const toggleBtn = isLeft ? $('#left-panel-toggle') : $('#right-panel-toggle');
+    if (collapsed) {
+      panel.dataset.prevWidth = panel.dataset.prevWidth || panel.getBoundingClientRect().width;
+      panel.classList.add('collapsed');
+      panel.style.width = `${COLLAPSED_WIDTH}px`;
+      if (toggleBtn) toggleBtn.textContent = '展開';
+    } else {
+      panel.classList.remove('collapsed');
+      const fallback = isLeft ? 320 : 340;
+      const prev = parseFloat(panel.dataset.prevWidth) || fallback;
+      panel.style.width = `${clamp(prev, MIN_PANEL, MAX_PANEL)}px`;
+      if (toggleBtn) toggleBtn.textContent = '最小化';
+    }
+  };
+
   const bindPanelResizers = () => {
     const leftPanel = $('#left-panel');
     const rightPanel = $('#right-panel');
@@ -1215,8 +2346,22 @@
 
     const applyLayout = (layout) => {
       if (!layout) return;
-      leftPanel.style.width = `${layout.left}px`;
-      rightPanel.style.width = `${layout.right}px`;
+      if (layout.leftCollapsed) {
+        leftPanel.dataset.prevWidth = layout.left || leftPanel.getBoundingClientRect().width;
+        setPanelCollapsed(leftPanel, true);
+      } else if (layout.left) {
+        leftPanel.dataset.prevWidth = layout.left;
+        setPanelCollapsed(leftPanel, false);
+        leftPanel.style.width = `${layout.left}px`;
+      }
+      if (layout.rightCollapsed) {
+        rightPanel.dataset.prevWidth = layout.right || rightPanel.getBoundingClientRect().width;
+        setPanelCollapsed(rightPanel, true);
+      } else if (layout.right) {
+        rightPanel.dataset.prevWidth = layout.right;
+        setPanelCollapsed(rightPanel, false);
+        rightPanel.style.width = `${layout.right}px`;
+      }
     };
 
     const loadLayout = () => {
@@ -1231,15 +2376,32 @@
     };
 
     const saveLayout = () => {
+      const leftCollapsed = leftPanel.classList.contains('collapsed');
+      const rightCollapsed = rightPanel.classList.contains('collapsed');
+      const leftWidth = leftCollapsed
+        ? (parseFloat(leftPanel.dataset.prevWidth) || leftPanel.getBoundingClientRect().width)
+        : leftPanel.getBoundingClientRect().width;
+      const rightWidth = rightCollapsed
+        ? (parseFloat(rightPanel.dataset.prevWidth) || rightPanel.getBoundingClientRect().width)
+        : rightPanel.getBoundingClientRect().width;
       const layout = {
-        left: leftPanel.getBoundingClientRect().width,
-        right: rightPanel.getBoundingClientRect().width
+        left: leftWidth,
+        right: rightWidth,
+        leftCollapsed,
+        rightCollapsed
       };
       localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
     };
+    persistLayout = saveLayout;
 
     const startResizePanel = (event, side) => {
       event.preventDefault();
+      if (side === 'left' && leftPanel.classList.contains('collapsed')) {
+        setPanelCollapsed(leftPanel, false);
+      }
+      if (side === 'right' && rightPanel.classList.contains('collapsed')) {
+        setPanelCollapsed(rightPanel, false);
+      }
       const startX = event.clientX;
       const startLeft = leftPanel.getBoundingClientRect().width;
       const startRight = rightPanel.getBoundingClientRect().width;
@@ -1249,9 +2411,11 @@
         if (side === 'left') {
           const next = clamp(startLeft + dx, MIN_PANEL, MAX_PANEL);
           leftPanel.style.width = `${next}px`;
+          leftPanel.dataset.prevWidth = next;
         } else {
           const next = clamp(startRight - dx, MIN_PANEL, MAX_PANEL);
           rightPanel.style.width = `${next}px`;
+          rightPanel.dataset.prevWidth = next;
         }
       };
 
@@ -1275,21 +2439,69 @@
     $('#page-delete').addEventListener('click', deletePage);
     $('#page-prev').addEventListener('click', () => {
       const idx = state.pages.findIndex(p => p.id === state.selectedPageId);
-      if (idx > 0) {
-        state.selectedPageId = state.pages[idx - 1].id;
+      const next = getNextPageIndex(idx, 'prev');
+      if (next >= 0 && next < state.pages.length) {
+        state.selectedPageId = state.pages[next].id;
         renderAll();
       }
     });
     $('#page-next').addEventListener('click', () => {
       const idx = state.pages.findIndex(p => p.id === state.selectedPageId);
-      if (idx < state.pages.length - 1) {
-        state.selectedPageId = state.pages[idx + 1].id;
+      const next = getNextPageIndex(idx, 'next');
+      if (next >= 0 && next < state.pages.length) {
+        state.selectedPageId = state.pages[next].id;
         renderAll();
       }
     });
     $('#page-select').addEventListener('change', (e) => {
       state.selectedPageId = e.target.value;
       renderAll();
+    });
+
+    const leftToggle = $('#left-panel-toggle');
+    const rightToggle = $('#right-panel-toggle');
+    if (leftToggle) {
+      leftToggle.addEventListener('click', () => {
+        const panel = $('#left-panel');
+        const collapsed = panel.classList.contains('collapsed');
+        setPanelCollapsed(panel, !collapsed);
+        persistLayout();
+      });
+    }
+    if (rightToggle) {
+      rightToggle.addEventListener('click', () => {
+        const panel = $('#right-panel');
+        const collapsed = panel.classList.contains('collapsed');
+        setPanelCollapsed(panel, !collapsed);
+        persistLayout();
+      });
+    }
+
+    const undoBtn = $('#undo');
+    const redoBtn = $('#redo');
+    if (undoBtn) undoBtn.addEventListener('click', undo);
+    if (redoBtn) redoBtn.addEventListener('click', redo);
+    document.addEventListener('keydown', (e) => {
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+      const isCtrl = e.ctrlKey || e.metaKey;
+      if (!isCtrl) return;
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+      e.preventDefault();
+      deleteSelectedItems(true);
     });
 
     const inspector = $('#inspector');
@@ -1332,6 +2544,11 @@
       });
     }
 
+    const fullscreenBtn = $('#toggle-fullscreen');
+    if (fullscreenBtn) {
+      fullscreenBtn.addEventListener('click', togglePreviewFullscreen);
+    }
+
     $('#toggle-view').addEventListener('click', () => {
       state.view.mode = state.view.mode === 'spread' ? 'continuous' : 'spread';
       updateView();
@@ -1346,6 +2563,52 @@
       scheduleSave();
     });
 
+    const pageTurnBtn = $('#toggle-page-turn');
+    if (pageTurnBtn) {
+      pageTurnBtn.addEventListener('click', () => {
+        state.view.pageTurn = state.view.pageTurn === 'rtl' ? 'ltr' : 'rtl';
+        updateView();
+        scheduleSave();
+      });
+    }
+
+    const snapBtn = $('#toggle-snap');
+    if (snapBtn) {
+      snapBtn.addEventListener('click', () => {
+        state.view.snap = !state.view.snap;
+        updateView();
+        scheduleSave();
+      });
+    }
+
+    const pageSizeSelect = $('#page-size');
+    if (pageSizeSelect) {
+      pageSizeSelect.value = state.view.pageSize || 'A4-P';
+      pageSizeSelect.addEventListener('change', (e) => {
+        state.view.pageSize = e.target.value;
+        applyPageSize(state.view.pageSize);
+        renderPages();
+        scheduleSave();
+      });
+    }
+
+    const alignLeft = $('#align-left');
+    const alignCenter = $('#align-center');
+    const alignRight = $('#align-right');
+    const alignTop = $('#align-top');
+    const alignMiddle = $('#align-middle');
+    const alignBottom = $('#align-bottom');
+    const distributeH = $('#distribute-h');
+    const distributeV = $('#distribute-v');
+    if (alignLeft) alignLeft.addEventListener('click', () => alignItems('left'));
+    if (alignCenter) alignCenter.addEventListener('click', () => alignItems('center'));
+    if (alignRight) alignRight.addEventListener('click', () => alignItems('right'));
+    if (alignTop) alignTop.addEventListener('click', () => alignItems('top'));
+    if (alignMiddle) alignMiddle.addEventListener('click', () => alignItems('middle'));
+    if (alignBottom) alignBottom.addEventListener('click', () => alignItems('bottom'));
+    if (distributeH) distributeH.addEventListener('click', () => distributeItems('h'));
+    if (distributeV) distributeV.addEventListener('click', () => distributeItems('v'));
+
     $('#zoom-range').addEventListener('input', (e) => {
       state.view.zoom = parseFloat(e.target.value);
       updateView();
@@ -1354,15 +2617,18 @@
 
     $('#print-pdf').addEventListener('click', () => window.print());
     $('#save-local').addEventListener('click', () => {
-      saveLocal();
-      alert('保存しました。');
+      const ok = saveLocal({ force: true, silentBackup: false });
+      if (ok) showToast('保存しました。', 'success');
     });
     $('#load-local').addEventListener('click', () => {
-      if (loadLocal()) {
+      const result = loadLocal();
+      if (result) {
         renderAll();
-        alert('読み込みました。');
-      } else {
-        alert('保存データがありません。');
+        showToast('読み込みました。', 'success');
+        resetHistory();
+        typesetAllMath();
+      } else if (result === null) {
+        showToast('保存データがありません。', 'info');
       }
     });
 
@@ -1386,8 +2652,10 @@
           state = normalizeState(data);
           renderAll();
           scheduleSave();
+          resetHistory();
+          typesetAllMath();
         } catch (err) {
-          alert('JSONの読み込みに失敗しました。');
+          showToast('JSONの読み込みに失敗しました。', 'danger');
         }
       };
       reader.readAsText(file);
@@ -1396,6 +2664,94 @@
 
     $('#add-text').addEventListener('click', () => addTextItem('text'));
     $('#add-point').addEventListener('click', () => addTextItem('point'));
+    const richAdd = $('#add-richtext');
+    if (richAdd) {
+      richAdd.addEventListener('click', () => addRichTextItemFromInput());
+    }
+    const richInput = $('#richtext-input');
+    if (richInput) {
+      richInput.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const html = e.clipboardData?.getData('text/html');
+        const text = e.clipboardData?.getData('text/plain');
+        const safe = html
+          ? sanitizeRichHtml(html)
+          : escapeHtml(text || '').replace(/\n/g, '<br>');
+        insertHtmlAtCursor(richInput, safe);
+        normalizeRichTextInput(richInput);
+      });
+      richInput.addEventListener('input', () => normalizeRichTextInput(richInput));
+      richInput.addEventListener('blur', () => normalizeRichTextInput(richInput));
+      normalizeRichTextInput(richInput);
+    }
+    const mathInput = $('#math-text');
+    const addMathBtn = $('#add-math');
+    const mathFrac = $('#math-insert-frac');
+    const mathSqrt = $('#math-insert-sqrt');
+    const mathSup = $('#math-insert-sup');
+    const mathSub = $('#math-insert-sub');
+    if (addMathBtn) {
+      addMathBtn.addEventListener('click', () => {
+        addMathItem(mathInput?.value || '');
+        if (mathInput) mathInput.value = '';
+      });
+    }
+    if (mathFrac) mathFrac.addEventListener('click', () => insertTemplate(mathInput, '\\frac{}{}'));
+    if (mathSqrt) mathSqrt.addEventListener('click', () => insertTemplate(mathInput, '\\sqrt{}'));
+    if (mathSup) mathSup.addEventListener('click', () => insertTemplate(mathInput, '^{}'));
+    if (mathSub) mathSub.addEventListener('click', () => insertTemplate(mathInput, '_{}'));
+
+    const templateGoal = $('#template-goal');
+    const templateSummary = $('#template-summary');
+    const templateQuestion = $('#template-question');
+    if (templateGoal) templateGoal.addEventListener('click', () => addTemplateItem('goal'));
+    if (templateSummary) templateSummary.addEventListener('click', () => addTemplateItem('summary'));
+    if (templateQuestion) templateQuestion.addEventListener('click', () => addTemplateItem('question'));
+
+    const addLineDiagram = $('#add-line-diagram');
+    if (addLineDiagram) {
+      addLineDiagram.addEventListener('click', () => {
+        const kind = $('#line-kind')?.value || 'number';
+        const min = parseFloat($('#line-min')?.value) || 0;
+        const max = parseFloat($('#line-max')?.value) || 10;
+        const step = parseFloat($('#line-step')?.value) || 1;
+        const length = parseFloat($('#line-length')?.value) || 420;
+        const lineColor = $('#line-color')?.value || '#1b1b1b';
+        const textColor = $('#line-text-color')?.value || '#1b1b1b';
+        if (kind !== 'protractor' && (step <= 0 || max <= min)) {
+          showToast('最小・最大・刻みの値を確認してください。', 'info');
+          return;
+        }
+        const diagram = generateNumberLineSvg({ kind, min, max, step, length, lineColor, textColor });
+        addSvgItem(diagram.svg, diagram.width, diagram.height, kind);
+      });
+    }
+
+    const addTileDiagram = $('#add-tile-diagram');
+    if (addTileDiagram) {
+      addTileDiagram.addEventListener('click', () => {
+        const dim = parseGridInput($('#tile-dim')?.value);
+        if (!dim || dim.rows <= 0 || dim.cols <= 0) {
+          showToast('サイズは「2*3」のように入力してください。', 'info');
+          return;
+        }
+        const kind = $('#tile-kind')?.value || 'tile';
+        const cell = parseFloat($('#tile-size')?.value) || 28;
+        const gap = parseFloat($('#tile-gap')?.value) || 6;
+        const fill = $('#tile-fill')?.value || '#8ecae6';
+        const stroke = $('#tile-stroke')?.value || '#1b1b1b';
+        const diagram = generateGridSvg({
+          rows: dim.rows,
+          cols: dim.cols,
+          cell,
+          gap,
+          kind,
+          fill,
+          stroke
+        });
+        addSvgItem(diagram.svg, diagram.width, diagram.height, kind);
+      });
+    }
     const drawToggle = $('#draw-toggle');
     if (drawToggle) {
       drawToggle.addEventListener('click', () => {
@@ -1528,6 +2884,18 @@
     if (inputBorderColor) inputBorderColor.addEventListener('input', applyInputStyles);
     applyInputStyles();
 
+    const fontCombine = $('#font-combine');
+    const fontCombineDigits = $('#font-combine-digits');
+    const fontVertical = $('#font-vertical');
+    const syncCombineDigits = () => {
+      if (!fontCombineDigits) return;
+      const allow = (fontCombine?.checked ?? false) && (fontVertical?.checked ?? false);
+      fontCombineDigits.disabled = !allow;
+    };
+    if (fontCombine) fontCombine.addEventListener('change', syncCombineDigits);
+    if (fontVertical) fontVertical.addEventListener('change', syncCombineDigits);
+    syncCombineDigits();
+
     $('#book-title').addEventListener('input', (e) => { state.project.title = e.target.value; scheduleSave(); });
     $('#book-subject').addEventListener('input', (e) => { state.project.subject = e.target.value; scheduleSave(); });
     $('#book-grade').addEventListener('input', (e) => { state.project.grade = e.target.value; scheduleSave(); });
@@ -1549,28 +2917,40 @@
       if (CLAMP_0_1_FIELDS.has(field)) {
         value = clamp(value, 0, 1);
       }
+      if (field === 'textCombineDigits') {
+        value = normalizeCombineDigits(value);
+      }
       items.forEach((item) => {
-        if (TEXT_FIELDS.has(field) && item.type !== 'text') return;
+        if (TEXT_FIELDS.has(field) && !(item.type === 'text' || item.type === 'richtext')) return;
+        if (MATH_FIELDS.has(field) && item.type !== 'math') return;
         if (DRAW_FIELDS.has(field) && item.type !== 'draw') return;
         item[field] = value;
+        if (item.type === 'math' && (
+          field === 'latex' ||
+          field === 'mathBold' ||
+          field === 'mathItalic' ||
+          field === 'mathUnderline'
+        )) {
+          scheduleMathTypeset(item);
+        }
       });
       renderPages();
       renderLayers();
       renderInspector();
       scheduleSave();
+      scheduleHistoryPush();
     });
 
-    $('#delete-item').addEventListener('click', () => {
-      const ids = new Set(getSelectedItemIds());
-      if (!ids.size) return;
-      state.pages.forEach(p => {
-        p.items = p.items.filter(i => !ids.has(i.id));
+    const mathRefresh = $('#ins-math-refresh');
+    if (mathRefresh) {
+      mathRefresh.addEventListener('click', () => {
+        const item = getSelectedItem();
+        if (!item || item.type !== 'math') return;
+        typesetMathItem(item);
       });
-      state.selectedItemIds = [];
-      state.selectedItemId = null;
-      renderAll();
-      scheduleSave();
-    });
+    }
+
+    $('#delete-item').addEventListener('click', () => deleteSelectedItems(true));
 
     $('#add-glossary').addEventListener('click', () => {
       const term = $('#glossary-term').value.trim();
@@ -1581,6 +2961,7 @@
       $('#glossary-def').value = '';
       renderSupport();
       scheduleSave();
+      pushHistory();
     });
 
     $('#add-citation').addEventListener('click', () => {
@@ -1590,6 +2971,7 @@
       $('#citation-input').value = '';
       renderSupport();
       scheduleSave();
+      pushHistory();
     });
 
     $('#add-check').addEventListener('click', () => {
@@ -1599,6 +2981,7 @@
       $('#check-input').value = '';
       renderSupport();
       scheduleSave();
+      pushHistory();
     });
 
     $('#preview').addEventListener('dragover', (e) => {
@@ -1621,10 +3004,44 @@
       };
       reader.readAsDataURL(file);
     });
+
+    const contextMenu = $('#context-menu');
+    if (contextMenu) {
+      contextMenu.addEventListener('click', (e) => {
+        const action = e.target?.dataset?.action;
+        if (!action) return;
+        if (action === 'front') bringSelectionToFront();
+        if (action === 'copy') duplicateSelectedItems();
+        if (action === 'delete') deleteSelectedItems(true);
+        hideContextMenu();
+      });
+    }
+    document.addEventListener('pointerdown', (e) => {
+      if (contextMenu && contextMenu.contains(e.target)) return;
+      hideContextMenu();
+    });
+    document.addEventListener('scroll', hideContextMenu, true);
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement && previewFullscreen) {
+        setPreviewFullscreen(false);
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      hideContextMenu();
+      if (previewFullscreen && !document.fullscreenElement) {
+        setPreviewFullscreen(false);
+      }
+    });
+    $('#preview').addEventListener('contextmenu', (e) => {
+      if (e.target.closest('.item')) return;
+      e.preventDefault();
+      hideContextMenu();
+    });
   };
 
   const init = () => {
-    loadLocal();
+    loadLocal({ silent: true });
     if (!state.pages.length) {
       state.pages = [createPage(1)];
     }
@@ -1634,8 +3051,9 @@
     bindPanelResizers();
     bindEvents();
     renderAll();
+    resetHistory();
+    typesetAllMath();
   };
 
-  init();
+    init();
 })();
-

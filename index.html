@@ -3,16 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>教科書メーカー Studio</title>
+  <title>教科書メーカー ヴァージョン0.1</title>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;700&family=Noto+Serif+JP:wght@400;700&family=Yomogi&family=Hachi+Maru+Pop&family=Zen+Maru+Gothic:wght@400;700&family=DotGothic16&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="index.css">
 </head>
 <body>
+<header id="app-header">
+  <div class="brand">
+    <span class="brand-main">教科書メーカー</span>
+    <span class="brand-sub">ヴァージョン0.1</span>
+  </div>
+  <div class="brand-tag">Textbook Studio</div>
+</header>
 <div id="app">
   <aside id="left-panel">
     <div class="panel-header">
-      記述・挿入
-      <span class="badge">左パネル</span>
+      <span class="title">記述・挿入</span>
+      <div class="panel-header-actions">
+        <span class="badge">左パネル</span>
+        <button id="left-panel-toggle" class="panel-toggle" type="button">最小化</button>
+      </div>
     </div>
     <div class="panel-body">
       <section class="panel-section">
@@ -63,6 +73,23 @@
           <label class="pill"><input id="font-bold" type="checkbox"> 太字</label>
           <label class="pill"><input id="font-underline" type="checkbox"> 下線</label>
           <label class="pill"><input id="font-italic" type="checkbox"> 斜体</label>
+          <label class="pill"><input id="font-vertical" type="checkbox"> 縦書き</label>
+        </div>
+        <div class="control-row">
+          <div>
+            <label for="font-orientation">英数字の向き</label>
+            <select id="font-orientation">
+              <option value="mixed">横向き(回転)</option>
+              <option value="upright">縦向き(正立)</option>
+            </select>
+          </div>
+          <div class="inline-row">
+            <label class="pill"><input id="font-combine" type="checkbox"> 縦中横</label>
+            <select id="font-combine-digits" class="mini-select">
+              <option value="2">2桁</option>
+              <option value="3">3桁</option>
+            </select>
+          </div>
         </div>
         <div class="control-row">
           <div>
@@ -111,6 +138,132 @@
           <button class="primary" id="add-text">本文を追加</button>
           <button class="primary" id="add-point">ポイントを追加</button>
         </div>
+      </section>
+
+      <section class="panel-section">
+        <h3>リッチテキスト</h3>
+        <label for="richtext-input">スタイル付き文章のコピーはこちら</label>
+        <div id="richtext-input" class="richtext-input" contenteditable="true" data-placeholder="スタイル付き文章のコピーはこちら"></div>
+        <div class="inline-row">
+          <button id="add-richtext" class="primary" type="button">リッチテキストを追加</button>
+        </div>
+        <span class="hint">貼り付けたスタイルを保持して追加します。</span>
+      </section>
+
+      <section class="panel-section">
+        <h3>数式</h3>
+        <label for="math-text">数式入力</label>
+        <textarea id="math-text" placeholder="例: \\frac{a}{b}"></textarea>
+        <div class="inline-row">
+          <label class="pill"><input id="math-bold" type="checkbox"> 太字</label>
+          <label class="pill"><input id="math-underline" type="checkbox"> 下線</label>
+          <label class="pill"><input id="math-italic" type="checkbox"> 斜体</label>
+        </div>
+        <div class="control-row">
+          <div>
+            <label for="math-color">文字色</label>
+            <input id="math-color" type="color" value="#1b1b1b">
+          </div>
+          <div>
+            <label for="math-size">サイズ(初期)</label>
+            <input id="math-size" type="number" min="12" max="72" value="24">
+          </div>
+        </div>
+        <div class="inline-row">
+          <button id="math-insert-frac" type="button">分数</button>
+          <button id="math-insert-sqrt" type="button">平方根</button>
+          <button id="math-insert-sup" type="button">上付き</button>
+          <button id="math-insert-sub" type="button">下付き</button>
+        </div>
+        <button id="add-math" class="primary" type="button">数式を追加</button>
+        <span class="hint">LaTeX形式で入力できます。</span>
+      </section>
+
+      <section class="panel-section">
+        <h3>テンプレート</h3>
+        <div class="inline-row">
+          <button id="template-goal" type="button">めあて</button>
+          <button id="template-summary" type="button">まとめ</button>
+          <button id="template-question" type="button">問い</button>
+        </div>
+        <span class="hint">教科書風の装飾枠をワンクリックで挿入できます。</span>
+      </section>
+
+      <section class="panel-section">
+        <h3>数直線・分度器</h3>
+        <label for="line-kind">種類</label>
+        <select id="line-kind">
+          <option value="number">数直線</option>
+          <option value="segment">線分図</option>
+          <option value="double">二重数直線</option>
+          <option value="protractor">分度器</option>
+        </select>
+        <div class="control-row">
+          <div>
+            <label for="line-min">最小</label>
+            <input id="line-min" type="number" value="0">
+          </div>
+          <div>
+            <label for="line-max">最大</label>
+            <input id="line-max" type="number" value="10">
+          </div>
+        </div>
+        <div class="control-row">
+          <div>
+            <label for="line-step">刻み</label>
+            <input id="line-step" type="number" value="1">
+          </div>
+          <div>
+            <label for="line-length">長さ(px)</label>
+            <input id="line-length" type="number" value="420">
+          </div>
+        </div>
+        <div class="control-row">
+          <div>
+            <label for="line-color">線色</label>
+            <input id="line-color" type="color" value="#1b1b1b">
+          </div>
+          <div>
+            <label for="line-text-color">文字色</label>
+            <input id="line-text-color" type="color" value="#1b1b1b">
+          </div>
+        </div>
+        <button id="add-line-diagram" class="primary" type="button">図を追加</button>
+      </section>
+
+      <section class="panel-section">
+        <h3>タイル・ドット図</h3>
+        <label for="tile-dim">サイズ (例: 2*3)</label>
+        <input id="tile-dim" type="text" placeholder="2*3">
+        <label for="tile-kind">種類</label>
+        <select id="tile-kind">
+          <option value="tile">タイル図</option>
+          <option value="dot">ドット図</option>
+          <option value="array">アレイ図</option>
+          <option value="ohajiki">おはじき</option>
+          <option value="bead">ビーダマ</option>
+        </select>
+        <div class="control-row">
+          <div>
+            <label for="tile-size">サイズ(px)</label>
+            <input id="tile-size" type="number" value="28">
+          </div>
+          <div>
+            <label for="tile-gap">間隔(px)</label>
+            <input id="tile-gap" type="number" value="6">
+          </div>
+        </div>
+        <div class="control-row">
+          <div>
+            <label for="tile-fill">塗り色</label>
+            <input id="tile-fill" type="color" value="#8ecae6">
+          </div>
+          <div>
+            <label for="tile-stroke">線色</label>
+            <input id="tile-stroke" type="color" value="#1b1b1b">
+          </div>
+        </div>
+        <button id="add-tile-diagram" class="primary" type="button">図を追加</button>
       </section>
 
       <section class="panel-section">
@@ -186,8 +339,44 @@
         <button id="page-next">次</button>
       </div>
       <div class="toolbar-group">
+        <button id="undo">戻る</button>
+        <button id="redo">進む</button>
+        <button id="toggle-snap">スナップ: ON</button>
+      </div>
+      <div class="toolbar-group align-group">
+        <span class="toolbar-label">整列</span>
+        <button id="align-left">左揃え</button>
+        <button id="align-center">左右中央</button>
+        <button id="align-right">右揃え</button>
+        <button id="align-top">上揃え</button>
+        <button id="align-middle">上下中央</button>
+        <button id="align-bottom">下揃え</button>
+        <button id="distribute-h">横等間隔</button>
+        <button id="distribute-v">縦等間隔</button>
+      </div>
+      <div class="toolbar-group">
+        <button id="toggle-fullscreen">全画面プレビュー</button>
         <button id="toggle-view">見開き: OFF</button>
         <button id="toggle-grid">グリッド: ON</button>
+        <button id="toggle-page-turn">ページ送り: 右</button>
+        <label class="pill">用紙
+          <select id="page-size">
+            <option value="A4-P">A4 縦</option>
+            <option value="A4-L">A4 横</option>
+            <option value="A3-P">A3 縦</option>
+            <option value="A3-L">A3 横</option>
+            <option value="A5-P">A5 縦</option>
+            <option value="A5-L">A5 横</option>
+            <option value="B5-P">B5 縦</option>
+            <option value="B5-L">B5 横</option>
+            <option value="Letter-P">Letter 縦</option>
+            <option value="Letter-L">Letter 横</option>
+            <option value="Legal-P">Legal 縦</option>
+            <option value="Legal-L">Legal 横</option>
+            <option value="Tabloid-P">Tabloid 縦</option>
+            <option value="Tabloid-L">Tabloid 横</option>
+          </select>
+        </label>
         <label class="pill">ズーム <input id="zoom-range" type="range" min="0.4" max="1.5" step="0.1" value="1"></label>
       </div>
       <div class="toolbar-group">
@@ -208,8 +397,11 @@
 
   <aside id="right-panel">
     <div class="panel-header">
-      設定・プロジェクト
-      <span class="badge">右パネル</span>
+      <span class="title">設定・プロジェクト</span>
+      <div class="panel-header-actions">
+        <span class="badge">右パネル</span>
+        <button id="right-panel-toggle" class="panel-toggle" type="button">最小化</button>
+      </div>
     </div>
     <div class="panel-body">
       <section class="panel-section">
@@ -257,6 +449,7 @@
           <div id="inspector-text-tools">
             <label for="ins-text">本文</label>
             <textarea id="ins-text" data-field="text"></textarea>
+            <div id="ins-richtext-note" class="hint" style="display:none">リッチテキストはプレビューでダブルクリックして編集できます。</div>
             <div class="control-row">
               <div>
                 <label for="ins-font">フォント</label>
@@ -278,6 +471,23 @@
               <label class="pill"><input id="ins-bold" type="checkbox" data-field="bold"> 太字</label>
               <label class="pill"><input id="ins-underline" type="checkbox" data-field="underline"> 下線</label>
               <label class="pill"><input id="ins-italic" type="checkbox" data-field="italic"> 斜体</label>
+              <label class="pill"><input id="ins-vertical" type="checkbox" data-field="vertical"> 縦書き</label>
+            </div>
+            <div class="control-row">
+              <div>
+                <label for="ins-orientation">英数字の向き</label>
+                <select id="ins-orientation" data-field="textOrientation">
+                  <option value="mixed">横向き(回転)</option>
+                  <option value="upright">縦向き(正立)</option>
+                </select>
+              </div>
+              <div class="inline-row">
+                <label class="pill"><input id="ins-combine" type="checkbox" data-field="textCombine"> 縦中横</label>
+                <select id="ins-combine-digits" class="mini-select" data-field="textCombineDigits">
+                  <option value="2">2桁</option>
+                  <option value="3">3桁</option>
+                </select>
+              </div>
             </div>
             <div class="control-row">
               <div>
@@ -347,6 +557,26 @@
             </div>
             <label class="pill"><input id="ins-draw-fill-enabled" type="checkbox" data-field="fillEnabled"> 塗りつぶし</label>
           </div>
+          <div id="inspector-math-tools" style="display:none">
+            <label for="ins-latex">数式(LaTeX)</label>
+            <textarea id="ins-latex" data-field="latex"></textarea>
+            <div class="inline-row">
+              <label class="pill"><input id="ins-math-bold" type="checkbox" data-field="mathBold"> 太字</label>
+              <label class="pill"><input id="ins-math-underline" type="checkbox" data-field="mathUnderline"> 下線</label>
+              <label class="pill"><input id="ins-math-italic" type="checkbox" data-field="mathItalic"> 斜体</label>
+            </div>
+            <div class="control-row">
+              <div>
+                <label for="ins-math-color">文字色</label>
+                <input id="ins-math-color" type="color" data-field="mathColor">
+              </div>
+              <div>
+                <label for="ins-math-size">サイズ</label>
+                <input id="ins-math-size" type="number" min="12" max="72" data-field="mathSize">
+              </div>
+            </div>
+            <button id="ins-math-refresh" type="button">数式を再生成</button>
+          </div>
           <button id="delete-item" class="danger">選択アイテムを削除</button>
         </div>
       </section>
@@ -385,6 +615,20 @@
   </aside>
 </div>
 
+<div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+<div id="context-menu" class="context-menu" role="menu" aria-hidden="true">
+  <button type="button" data-action="front">最前面へ</button>
+  <button type="button" data-action="copy">コピー</button>
+  <button type="button" data-action="delete">削除</button>
+</div>
+
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+    svg: { fontCache: 'local' }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/browser.js"></script>
 <script src="index.js"></script>
 </body>
