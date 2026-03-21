@@ -249,6 +249,18 @@ button.danger {
 
 .control-row.single { grid-template-columns: 1fr; }
 
+.expand-block {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+}
+
+.expand-block.open {
+  max-height: 220px;
+  opacity: 1;
+}
+
 .inline-row {
   display: flex;
   align-items: center;

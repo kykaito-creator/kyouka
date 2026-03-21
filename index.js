@@ -1733,7 +1733,8 @@
 
   const generateNumberLineSvg = (options) => {
     const {
-      kind, min, max, step, length, lineColor, textColor
+      kind, min, max, step, length, lineColor, textColor,
+      min2, max2, step2, showProtractorLabels = true
     } = options;
     const padding = 24;
     const baseY = 40;
@@ -1751,15 +1752,22 @@
       parts += `<line x1="${padding}" y1="${y}" x2="${padding + usable}" y2="${y}" stroke="${lineColor}" stroke-width="2" />`;
     };
 
-    const drawTicks = (y, showLabels, labelOffset) => {
+    const drawTicks = (y, showLabels, labelOffset, labelFn) => {
       for (let i = 0; i <= tickCount; i += 1) {
         const x = padding + (usable * i) / tickCount;
         parts += `<line x1="${x}" y1="${y - tickSize / 2}" x2="${x}" y2="${y + tickSize / 2}" stroke="${lineColor}" stroke-width="2" />`;
-        if (showLabels) {
-          const value = min + step * i;
+        if (showLabels && labelFn) {
+          const value = labelFn(i);
           parts += `<text x="${x}" y="${y + labelOffset}" text-anchor="middle" font-size="12" fill="${textColor}">${value}</text>`;
         }
       }
+    };
+
+    const formatNumber = (value) => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return '';
+      const rounded = Math.round(num * 1000) / 1000;
+      return Number.isInteger(rounded) ? String(rounded) : String(rounded);
     };
 
     if (kind === 'segment') {
@@ -1772,8 +1780,20 @@
     } else if (kind === 'double') {
       drawLine(lineY);
       drawLine(secondY);
-      drawTicks(lineY, true, 18);
-      drawTicks(secondY, true, 18);
+      const topLabel = (i) => formatNumber(min + step * i);
+      const hasMin2 = Number.isFinite(min2);
+      const hasMax2 = Number.isFinite(max2);
+      const hasStep2 = Number.isFinite(step2);
+      let bottomLabel;
+      if (hasMin2 && hasStep2) {
+        bottomLabel = (i) => formatNumber(min2 + step2 * i);
+      } else if (hasMin2 && hasMax2) {
+        bottomLabel = (i) => formatNumber(min2 + (max2 - min2) * (i / tickCount));
+      } else {
+        bottomLabel = (i) => formatNumber(min + step * i);
+      }
+      drawTicks(lineY, true, 18, topLabel);
+      drawTicks(secondY, true, 18, bottomLabel);
     } else if (kind === 'protractor') {
       const radius = 120;
       const cx = radius + 20;
@@ -1789,15 +1809,18 @@
         const x2 = cx + (radius - 10) * Math.cos(theta);
         const y2 = cy - (radius - 10) * Math.sin(theta);
         parts += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${lineColor}" stroke-width="2" />`;
-        const tx = cx + (radius - 26) * Math.cos(theta);
-        const ty = cy - (radius - 26) * Math.sin(theta);
-        parts += `<text x="${tx}" y="${ty}" text-anchor="middle" font-size="10" fill="${textColor}">${angle}</text>`;
+        if (showProtractorLabels) {
+          const tx = cx + (radius - 26) * Math.cos(theta);
+          const ty = cy - (radius - 26) * Math.sin(theta);
+          parts += `<text x="${tx}" y="${ty}" text-anchor="middle" font-size="10" fill="${textColor}">${angle}</text>`;
+        }
       }
       const svg = svgWrap(widthP, heightP, parts);
       return { svg, width: widthP, height: heightP };
     } else {
       drawLine(lineY);
-      drawTicks(lineY, true, 18);
+      const label = (i) => formatNumber(min + step * i);
+      drawTicks(lineY, true, 18, label);
     }
 
     const svg = svgWrap(width, height, parts);
@@ -2972,6 +2995,22 @@
     if (templateQuestion) templateQuestion.addEventListener('click', () => addTemplateItem('question'));
 
     const addLineDiagram = $('#add-line-diagram');
+    const lineKind = $('#line-kind');
+    const lineDoubleOptions = $('#line-double-options');
+    const lineProtractorOptions = $('#line-protractor-options');
+    const updateLineOptions = () => {
+      const kind = lineKind?.value || 'number';
+      if (lineDoubleOptions) {
+        lineDoubleOptions.classList.toggle('open', kind === 'double');
+      }
+      if (lineProtractorOptions) {
+        lineProtractorOptions.classList.toggle('open', kind === 'protractor');
+      }
+    };
+    if (lineKind) {
+      lineKind.addEventListener('change', updateLineOptions);
+      updateLineOptions();
+    }
     if (addLineDiagram) {
       addLineDiagram.addEventListener('click', () => {
         const kind = $('#line-kind')?.value || 'number';
@@ -2981,11 +3020,21 @@
         const length = parseFloat($('#line-length')?.value) || 420;
         const lineColor = $('#line-color')?.value || '#1b1b1b';
         const textColor = $('#line-text-color')?.value || '#1b1b1b';
+        const min2Raw = $('#line-min-2')?.value;
+        const max2Raw = $('#line-max-2')?.value;
+        const step2Raw = $('#line-step-2')?.value;
+        const min2 = min2Raw !== '' && min2Raw != null ? parseFloat(min2Raw) : undefined;
+        const max2 = max2Raw !== '' && max2Raw != null ? parseFloat(max2Raw) : undefined;
+        const step2 = step2Raw !== '' && step2Raw != null ? parseFloat(step2Raw) : undefined;
+        const showProtractorLabels = $('#protractor-labels')?.checked ?? true;
         if (kind !== 'protractor' && (step <= 0 || max <= min)) {
           showToast('最小・最大・刻みの値を確認してください。', 'info');
           return;
         }
-        const diagram = generateNumberLineSvg({ kind, min, max, step, length, lineColor, textColor });
+        const diagram = generateNumberLineSvg({
+          kind, min, max, step, length, lineColor, textColor,
+          min2, max2, step2, showProtractorLabels
+        });
         addSvgItem(diagram.svg, diagram.width, diagram.height, kind);
       });
     }
