@@ -582,11 +582,116 @@
     updateFullscreenButton();
   };
 
+  const getPagePixelSize = (pageId) => {
+    const info = getPageById(pageId);
+    const scale = state.view.zoom || 1;
+    if (info && info.rect) {
+      return { width: info.rect.width / scale, height: info.rect.height / scale };
+    }
+    return { width: 800, height: 1100 };
+  };
+
+  const getTextMeasureContext = (() => {
+    const canvas = document.createElement('canvas');
+    return canvas.getContext('2d');
+  })();
+
+  const buildFontSpec = (style) => {
+    const weight = style.bold ? '700' : '400';
+    const italic = style.italic ? 'italic ' : '';
+    return `${italic}${weight} ${style.fontSize}px ${style.fontFamily}`;
+  };
+
+  const wrapTextToLines = (text, maxWidth, style) => {
+    const ctx = getTextMeasureContext;
+    if (!ctx) return String(text || '').split(/\r?\n/);
+    ctx.font = buildFontSpec(style);
+    const lines = [];
+    let line = '';
+    const raw = String(text || '').replace(/\r\n/g, '\n');
+    for (const ch of raw) {
+      if (ch === '\n') {
+        lines.push(line);
+        line = '';
+        continue;
+      }
+      const next = line + ch;
+      const width = ctx.measureText(next).width;
+      if (width > maxWidth && line) {
+        lines.push(line);
+        line = ch;
+      } else {
+        line = next;
+      }
+    }
+    lines.push(line);
+    return lines;
+  };
+
+  const addPaginatedTextItems = (text, style, kind) => {
+    const page = getSelectedPage();
+    if (!page) return false;
+    const { width: pageW, height: pageH } = getPagePixelSize(page.id);
+    const marginX = 40;
+    const marginY = 60;
+    const maxWidth = Math.max(120, pageW - marginX * 2);
+    const maxHeight = Math.max(120, pageH - marginY * 2);
+    const lineHeightPx = Math.max(1, (style.lineHeight || 1.5) * style.fontSize);
+    const maxLines = Math.max(1, Math.floor(maxHeight / lineHeightPx));
+    const lines = wrapTextToLines(text, maxWidth, style);
+    if (lines.length <= maxLines) return false;
+
+    const chunks = [];
+    for (let i = 0; i < lines.length; i += maxLines) {
+      chunks.push(lines.slice(i, i + maxLines));
+    }
+
+    const pageIndex = state.pages.findIndex(p => p.id === page.id);
+    let insertIndex = pageIndex + 1;
+    const pagesForChunks = [page];
+    for (let i = 1; i < chunks.length; i += 1) {
+      const newPage = createPage(state.pages.length + 1);
+      state.pages.splice(insertIndex, 0, newPage);
+      pagesForChunks.push(newPage);
+      insertIndex += 1;
+    }
+
+    const createdItems = [];
+    chunks.forEach((chunk, idx) => {
+      const targetPage = pagesForChunks[idx];
+      const item = createTextItem(chunk.join('\n'), style, kind);
+      item.x = marginX;
+      item.y = marginY;
+      item.w = maxWidth;
+      item.h = Math.min(maxHeight, chunk.length * lineHeightPx + 8);
+      targetPage.items.push(item);
+      createdItems.push(item);
+    });
+
+    const lastItem = createdItems[createdItems.length - 1];
+    if (lastItem) {
+      state.selectedItemIds = [lastItem.id];
+      state.selectedItemId = lastItem.id;
+      state.selectedPageId = pagesForChunks[pagesForChunks.length - 1].id;
+    }
+    showToast('長文のため複数ページに分割して追加しました。', 'success');
+    renderAll();
+    scheduleSave();
+    pushHistory();
+    return true;
+  };
+
   const PAGE_SIZES = {
     'A4-P': { w: 210, h: 297, unit: 'mm' },
     'A4-L': { w: 297, h: 210, unit: 'mm' },
     'A3-P': { w: 297, h: 420, unit: 'mm' },
     'A3-L': { w: 420, h: 297, unit: 'mm' },
+    'A2-P': { w: 420, h: 594, unit: 'mm' },
+    'A2-L': { w: 594, h: 420, unit: 'mm' },
+    'A1-P': { w: 594, h: 841, unit: 'mm' },
+    'A1-L': { w: 841, h: 594, unit: 'mm' },
+    'A0-P': { w: 841, h: 1189, unit: 'mm' },
+    'A0-L': { w: 1189, h: 841, unit: 'mm' },
     'A5-P': { w: 148, h: 210, unit: 'mm' },
     'A5-L': { w: 210, h: 148, unit: 'mm' },
     'B5-P': { w: 182, h: 257, unit: 'mm' },
@@ -1661,6 +1766,9 @@
       style.borderWidth = style.borderWidth === 0 ? 2 : style.borderWidth;
       text = `ポイント: ${text}`;
     }
+    if (addPaginatedTextItems(text, style, kind)) {
+      return;
+    }
     const item = createTextItem(text, style, kind);
     page.items.push(item);
     state.selectedItemIds = [item.id];
@@ -1811,7 +1919,7 @@
       kind, min, max, step, length, lineColor, textColor,
       min2, max2, step2, showProtractorLabels = true,
       protractorStep = 10, protractorLineColor, protractorTextColor,
-      ribbonHeight = 18, ribbonFill = '#d9e6ff'
+      ribbonHeight = 18, ribbonFill = '#d9e6ff', ribbonRounded = true
     } = options;
     const padding = 24;
     const baseY = 40;
@@ -1874,7 +1982,7 @@
     } else if (kind === 'ribbon') {
       const barHeight = Math.max(8, ribbonHeight || 18);
       const barY = lineY - barHeight / 2;
-      const radius = Math.min(8, barHeight / 2);
+      const radius = ribbonRounded ? Math.min(8, barHeight / 2) : 0;
       const label = (i) => formatNumber(min + step * i);
       parts += `<rect x="${padding}" y="${barY}" width="${usable}" height="${barHeight}" rx="${radius}" fill="${ribbonFill}" stroke="${lineColor}" stroke-width="2" />`;
       for (let i = 0; i <= tickCount; i += 1) {
@@ -2541,16 +2649,12 @@
 
     const onMove = (e) => {
       let target = getPageAtPoint(e.clientX, e.clientY);
-      if (state.view.mode !== 'spread') {
-        if (!target || target.pageId !== start.pageId) {
-          target = getPageById(start.pageId);
-        }
-      } else if (!target) {
+      if (!target) {
         target = getPageById(start.pageId);
       }
       if (!target) return;
 
-      if (state.view.mode === 'spread' && target.pageId !== start.pageId) {
+      if (target.pageId !== start.pageId) {
         const prevPage = state.pages.find(p => p.id === start.pageId);
         const nextPage = state.pages.find(p => p.id === target.pageId);
         if (prevPage && nextPage) {
@@ -3138,6 +3242,7 @@
         const protractorTextColor = $('#protractor-text-color')?.value || textColor;
         const ribbonHeight = parseFloat($('#line-ribbon-height')?.value) || 18;
         const ribbonFill = $('#line-ribbon-fill')?.value || '#d9e6ff';
+        const ribbonRounded = $('#line-ribbon-rounded')?.checked ?? true;
         if (kind !== 'protractor' && (step <= 0 || max <= min)) {
           showToast('最小・最大・刻みの値を確認してください。', 'info');
           return;
@@ -3146,7 +3251,7 @@
           kind, min, max, step, length, lineColor, textColor,
           min2, max2, step2, showProtractorLabels,
           protractorStep, protractorLineColor, protractorTextColor,
-          ribbonHeight, ribbonFill
+          ribbonHeight, ribbonFill, ribbonRounded
         });
         addSvgItem(diagram.svg, diagram.width, diagram.height, kind);
       });
