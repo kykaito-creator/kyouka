@@ -9,6 +9,7 @@
   const HISTORY_LIMIT = 40;
   const FULLSCREEN_CLASS = 'fullscreen-preview';
   const GRID_KINDS = new Set(['tile', 'dot', 'array', 'ohajiki', 'bead', 'grid']);
+  const SPRITE_MASK_ENABLED = window.location.protocol !== 'file:';
   let saveTimer = null;
   let saveRetryAt = 0;
   let saveFailNotified = false;
@@ -1876,12 +1877,16 @@
           const imgX = x + offset;
           const imgY = y + offset;
           if (sprite) {
-            const id = `sprite_${kind}_${spriteIndex}`;
-            spriteIndex += 1;
-            defs += `<mask id="${id}" maskUnits="userSpaceOnUse" mask-type="alpha">` +
-              `<image href="${sprite}" x="${imgX}" y="${imgY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />` +
-              `</mask>`;
-            parts += `<rect x="${imgX}" y="${imgY}" width="${size}" height="${size}" fill="${fill}" mask="url(#${id})" />`;
+            if (SPRITE_MASK_ENABLED) {
+              const id = `sprite_${kind}_${spriteIndex}`;
+              spriteIndex += 1;
+              defs += `<mask id="${id}" maskUnits="userSpaceOnUse" mask-type="alpha">` +
+                `<image href="${sprite}" x="${imgX}" y="${imgY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />` +
+                `</mask>`;
+              parts += `<rect x="${imgX}" y="${imgY}" width="${size}" height="${size}" fill="${fill}" mask="url(#${id})" />`;
+            } else {
+              parts += `<image href="${sprite}" x="${imgX}" y="${imgY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />`;
+            }
           } else {
             const radius = cell * 0.45;
             const cx = x + cell / 2;
