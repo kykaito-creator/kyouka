@@ -240,6 +240,7 @@
           <option value="tile">タイル図</option>
           <option value="dot">ドット図</option>
           <option value="array">アレイ図</option>
+          <option value="grid">方眼マス</option>
           <option value="ohajiki">おはじき</option>
           <option value="bead">ビーダマ</option>
         </select>
@@ -358,6 +359,7 @@
         <button id="toggle-fullscreen">全画面プレビュー</button>
         <button id="toggle-view">見開き: OFF</button>
         <button id="toggle-grid">グリッド: ON</button>
+        <button id="toggle-kokugo">国語モード: OFF</button>
         <button id="toggle-page-turn">ページ送り: 右</button>
         <label class="pill">用紙
           <select id="page-size">
@@ -576,6 +578,29 @@
               </div>
             </div>
             <button id="ins-math-refresh" type="button">数式を再生成</button>
+          </div>
+          <div id="inspector-grid-tools" style="display:none">
+            <label>タイル・ドット図</label>
+            <div class="control-row">
+              <div>
+                <label for="ins-grid-fill">塗り色</label>
+                <input id="ins-grid-fill" type="color" data-grid-field="gridFill">
+              </div>
+              <div>
+                <label for="ins-grid-stroke">線色</label>
+                <input id="ins-grid-stroke" type="color" data-grid-field="gridStroke">
+              </div>
+            </div>
+            <div class="control-row">
+              <div>
+                <label for="ins-grid-cell">サイズ(px)</label>
+                <input id="ins-grid-cell" type="number" min="4" max="120" data-grid-field="gridCell">
+              </div>
+              <div>
+                <label for="ins-grid-gap">間隔(px)</label>
+                <input id="ins-grid-gap" type="number" min="0" max="60" data-grid-field="gridGap">
+              </div>
+            </div>
           </div>
           <button id="delete-item" class="danger">選択アイテムを削除</button>
         </div>

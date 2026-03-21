@@ -344,6 +344,10 @@ button.danger {
   gap: 24px;
 }
 
+.page-container.kokugo {
+  direction: rtl;
+}
+
 .page-container.draw-mode .page,
 .page-container.draw-mode .item {
   cursor: crosshair;

@@ -8,6 +8,7 @@
   const COLLAPSED_WIDTH = 52;
   const HISTORY_LIMIT = 40;
   const FULLSCREEN_CLASS = 'fullscreen-preview';
+  const GRID_KINDS = new Set(['tile', 'dot', 'array', 'ohajiki', 'bead', 'grid']);
   let saveTimer = null;
   let saveRetryAt = 0;
   let saveFailNotified = false;
@@ -121,8 +122,22 @@
   const updateHistoryButtons = () => {
     const undoBtn = $('#undo');
     const redoBtn = $('#redo');
-    if (undoBtn) undoBtn.disabled = history.index <= 0;
-    if (redoBtn) redoBtn.disabled = history.index >= history.stack.length - 1;
+    const undoCount = Math.max(0, history.index);
+    const redoCount = Math.max(0, history.stack.length - 1 - history.index);
+    if (undoBtn) {
+      undoBtn.disabled = history.index <= 0;
+      if (!undoBtn.dataset.baseLabel) {
+        undoBtn.dataset.baseLabel = undoBtn.textContent.trim() || '戻る';
+      }
+      undoBtn.textContent = `${undoBtn.dataset.baseLabel} (${undoCount})`;
+    }
+    if (redoBtn) {
+      redoBtn.disabled = history.index >= history.stack.length - 1;
+      if (!redoBtn.dataset.baseLabel) {
+        redoBtn.dataset.baseLabel = redoBtn.textContent.trim() || '進む';
+      }
+      redoBtn.textContent = `${redoBtn.dataset.baseLabel} (${redoCount})`;
+    }
   };
 
   const pushHistory = (force = false) => {
@@ -305,7 +320,7 @@
     selectedPageId: null,
     selectedItemId: null,
     selectedItemIds: [],
-    view: { mode: 'continuous', showGrid: true, zoom: 1, drawMode: false, drawTool: 'curve', snap: true, pageSize: 'A4-P', pageTurn: 'ltr' },
+    view: { mode: 'continuous', showGrid: true, zoom: 1, drawMode: false, drawTool: 'curve', snap: true, pageSize: 'A4-P', pageTurn: 'ltr', kokugoMode: false },
     support: { glossary: [], citations: [], checklist: [] }
   });
 
@@ -316,6 +331,9 @@
     if (!input || typeof input !== 'object') return base;
     base.project = { ...base.project, ...(input.project || {}) };
     base.view = { ...base.view, ...(input.view || {}) };
+    if (base.view.kokugoMode) {
+      base.view.pageTurn = 'rtl';
+    }
     base.support = { ...base.support, ...(input.support || {}) };
     base.pages = Array.isArray(input.pages) && input.pages.length
       ? input.pages.map((page, index) => ({
@@ -353,18 +371,25 @@
             shape: item.shape || 'rect',
             src: item.src || '',
             latex: item.latex || '',
-            mathSvg: item.mathSvg || '',
+            mathSvg: '',
             mathColor: item.mathColor || '#1b1b1b',
             mathBold: !!item.mathBold,
             mathItalic: !!item.mathItalic,
             mathUnderline: !!item.mathUnderline,
             mathSize: typeof item.mathSize === 'number' ? item.mathSize : 24,
-            svg: item.svg || '',
-            svgKind: item.svgKind || 'diagram',
+            svg: sanitizeSvgMarkup(item.svg || ''),
+            svgKind: item.svgKind || (GRID_KINDS.has(item.gridKind) ? item.gridKind : 'diagram'),
             points: Array.isArray(item.points) ? item.points.map(pt => ({
               x: typeof pt.x === 'number' ? pt.x : 0,
               y: typeof pt.y === 'number' ? pt.y : 0
             })) : [],
+            gridKind: GRID_KINDS.has(item.gridKind) ? item.gridKind : (GRID_KINDS.has(item.svgKind) ? item.svgKind : null),
+            gridRows: Number.isFinite(parseInt(item.gridRows, 10)) ? parseInt(item.gridRows, 10) : 1,
+            gridCols: Number.isFinite(parseInt(item.gridCols, 10)) ? parseInt(item.gridCols, 10) : 1,
+            gridCell: typeof item.gridCell === 'number' ? item.gridCell : 28,
+            gridGap: typeof item.gridGap === 'number' ? item.gridGap : 6,
+            gridFill: item.gridFill || (item.svgKind === 'array' ? '#111111' : '#8ecae6'),
+            gridStroke: item.gridStroke || '#1b1b1b',
             drawKind: item.drawKind || 'free',
             strokeColor: item.strokeColor || '#1b1b1b',
             strokeWidth: typeof item.strokeWidth === 'number' ? item.strokeWidth : 3,
@@ -424,6 +449,7 @@
       if (!state.selectedPageId && state.pages.length) {
         state.selectedPageId = state.pages[0].id;
       }
+      migrateGridItems();
       return true;
     } catch (err) {
       console.error('読み込みに失敗しました。', err);
@@ -512,12 +538,23 @@
     const container = $('#page-container');
     container.classList.toggle('spread', state.view.mode === 'spread');
     container.classList.toggle('draw-mode', !!state.view.drawMode);
+    container.classList.toggle('kokugo', !!state.view.kokugoMode);
     container.style.setProperty('--zoom', state.view.zoom);
     $('#toggle-view').textContent = `見開き: ${state.view.mode === 'spread' ? 'ON' : 'OFF'}`;
     $('#toggle-grid').textContent = `グリッド: ${state.view.showGrid ? 'ON' : 'OFF'}`;
     const pageTurnBtn = $('#toggle-page-turn');
     if (pageTurnBtn) {
-      pageTurnBtn.textContent = `ページ送り: ${state.view.pageTurn === 'rtl' ? '左' : '右'}`;
+      if (state.view.kokugoMode) {
+        state.view.pageTurn = 'rtl';
+      }
+      pageTurnBtn.disabled = !!state.view.kokugoMode;
+      pageTurnBtn.textContent = state.view.kokugoMode
+        ? 'ページ送り: 国語'
+        : `ページ送り: ${state.view.pageTurn === 'rtl' ? '左' : '右'}`;
+    }
+    const kokugoBtn = $('#toggle-kokugo');
+    if (kokugoBtn) {
+      kokugoBtn.textContent = `国語モード: ${state.view.kokugoMode ? 'ON' : 'OFF'}`;
     }
     const snapBtn = $('#toggle-snap');
     if (snapBtn) {
@@ -685,6 +722,88 @@
       root.childNodes.forEach(child => sanitizeNode(child, container));
     }
     return container.innerHTML;
+  };
+
+  const sanitizeSvgMarkup = (svgText) => {
+    if (!svgText) return '';
+    const raw = String(svgText).trim();
+    if (!raw) return '';
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(raw, 'image/svg+xml');
+    if (doc.querySelector('parsererror')) return '';
+    const root = doc.documentElement;
+    if (!root || root.tagName.toLowerCase() !== 'svg') return '';
+
+    const allowedTags = new Set([
+      'svg','g','path','line','rect','circle','ellipse','polyline','polygon','text','tspan','image','defs','mask'
+    ]);
+    const allowedAttrs = new Set([
+      'viewbox','width','height','x','y','x1','y1','x2','y2','cx','cy','r','rx','ry','d','fill','stroke',
+      'stroke-width','stroke-linecap','stroke-linejoin','font-size','text-anchor','transform','opacity','points',
+      'xmlns','id','mask','maskunits','maskcontentunits','mask-type','preserveaspectratio','href'
+    ]);
+
+    const isSafeHref = (value) => {
+      const v = String(value || '').trim();
+      if (!v) return false;
+      if (/^data:image\/(png|jpe?g|webp|gif);/i.test(v)) return true;
+      if (v.startsWith('assets/sprites/')) return true;
+      if (v.startsWith('./assets/sprites/')) return true;
+      return false;
+    };
+
+    const cleanDoc = document.implementation.createDocument('http://www.w3.org/2000/svg', 'svg', null);
+    const cleanRoot = cleanDoc.documentElement;
+    cleanRoot.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+
+    const isSafeAttr = (name, value) => {
+      const key = String(name || '').toLowerCase();
+      const val = String(value || '');
+      if (!key) return false;
+      if (key.startsWith('on')) return false;
+      if (key === 'href' || key === 'xlink:href') return isSafeHref(val);
+      if (key === 'mask') {
+        return /^url\(#[-_a-z0-9]+\)$/i.test(val);
+      }
+      if (key === 'id') {
+        return /^[-_a-z0-9]+$/i.test(val);
+      }
+      if (!allowedAttrs.has(key)) return false;
+      if (/url\s*\(/i.test(val)) return false;
+      if (/javascript:/i.test(val)) return false;
+      return true;
+    };
+
+    const copyAttrs = (src, dest) => {
+      if (!src?.attributes) return;
+      Array.from(src.attributes).forEach((attr) => {
+        if (isSafeAttr(attr.name, attr.value)) {
+          dest.setAttribute(attr.name, attr.value);
+        }
+      });
+    };
+
+    const sanitizeNode = (node, parent) => {
+      if (!node) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        parent.appendChild(cleanDoc.createTextNode(node.textContent || ''));
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toLowerCase();
+      if (!allowedTags.has(tag)) {
+        node.childNodes.forEach(child => sanitizeNode(child, parent));
+        return;
+      }
+      const el = cleanDoc.createElementNS('http://www.w3.org/2000/svg', tag);
+      copyAttrs(node, el);
+      node.childNodes.forEach(child => sanitizeNode(child, el));
+      parent.appendChild(el);
+    };
+
+    copyAttrs(root, cleanRoot);
+    root.childNodes.forEach(child => sanitizeNode(child, cleanRoot));
+    return cleanRoot.outerHTML;
   };
 
   const isRichTextEmpty = (html) => {
@@ -1126,6 +1245,20 @@
     } else {
       mathTools.style.display = 'none';
     }
+
+    const gridTools = $('#inspector-grid-tools');
+    if (item.type === 'svg' && GRID_KINDS.has(item.svgKind)) {
+      gridTools.style.display = 'block';
+      const meta = normalizeGridMeta(item);
+      $('#ins-grid-fill').value = meta.fill;
+      $('#ins-grid-stroke').value = meta.stroke;
+      $('#ins-grid-cell').value = meta.cell;
+      const gapInput = $('#ins-grid-gap');
+      gapInput.value = meta.gap;
+      gapInput.disabled = item.svgKind === 'grid';
+    } else if (gridTools) {
+      gridTools.style.display = 'none';
+    }
   };
 
   const renderSupport = () => {
@@ -1136,7 +1269,7 @@
       row.className = 'list-item';
       row.innerHTML = `<div><strong>${escapeHtml(item.term)}</strong><br><span class="muted">${escapeHtml(item.def)}</span></div>`;
       const del = document.createElement('button');
-      del.textContent = '蜑企勁';
+      del.textContent = '削除';
       del.addEventListener('click', () => {
         state.support.glossary.splice(index, 1);
         renderSupport();
@@ -1154,7 +1287,7 @@
       row.className = 'list-item';
       row.innerHTML = `<div>${escapeHtml(item)}</div>`;
       const del = document.createElement('button');
-      del.textContent = '蜑企勁';
+      del.textContent = '削除';
       del.addEventListener('click', () => {
         state.support.citations.splice(index, 1);
         renderSupport();
@@ -1185,7 +1318,7 @@
       label.appendChild(checkbox);
       label.appendChild(span);
       const del = document.createElement('button');
-      del.textContent = '蜑企勁';
+      del.textContent = '削除';
       del.addEventListener('click', () => {
         state.support.checklist.splice(index, 1);
         renderSupport();
@@ -1686,36 +1819,157 @@
     return null;
   };
 
+  const SPRITES = {
+    ohajiki: 'assets/sprites/ohajiki.png',
+    bead: 'assets/sprites/bead.png'
+  };
+
   const generateGridSvg = (options) => {
     const {
       rows, cols, cell, gap, kind, fill, stroke
     } = options;
     const pad = 12;
-    const width = cols * cell + (cols - 1) * gap + pad * 2;
-    const height = rows * cell + (rows - 1) * gap + pad * 2;
+    const effectiveGap = kind === 'grid' ? 0 : gap;
+    const width = cols * cell + (cols - 1) * effectiveGap + pad * 2;
+    const height = rows * cell + (rows - 1) * effectiveGap + pad * 2;
     let parts = '';
+    let defs = '';
+    let spriteIndex = 0;
+
+    if (kind === 'grid') {
+      const gridWidth = cols * cell;
+      const gridHeight = rows * cell;
+      const x0 = pad;
+      const y0 = pad;
+      parts += `<rect x="${x0}" y="${y0}" width="${gridWidth}" height="${gridHeight}" fill="transparent" stroke="${stroke}" stroke-width="1" />`;
+      for (let c = 1; c < cols; c += 1) {
+        const x = x0 + c * cell;
+        parts += `<line x1="${x}" y1="${y0}" x2="${x}" y2="${y0 + gridHeight}" stroke="${stroke}" stroke-width="1" />`;
+      }
+      for (let r = 1; r < rows; r += 1) {
+        const y = y0 + r * cell;
+        parts += `<line x1="${x0}" y1="${y}" x2="${x0 + gridWidth}" y2="${y}" stroke="${stroke}" stroke-width="1" />`;
+      }
+      const svg = svgWrap(width, height, parts);
+      return { svg, width, height };
+    }
+
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        const x = pad + c * (cell + gap);
-        const y = pad + r * (cell + gap);
+        const x = pad + c * (cell + effectiveGap);
+        const y = pad + r * (cell + effectiveGap);
         if (kind === 'dot') {
           const radius = Math.max(2, cell * 0.18);
           const cx = x + cell / 2;
           const cy = y + cell / 2;
           parts += `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${fill}" />`;
-        } else if (kind === 'ohajiki' || kind === 'bead') {
-          const radius = cell * 0.45;
+        } else if (kind === 'array') {
+          const radius = Math.max(2, cell * 0.32);
           const cx = x + cell / 2;
           const cy = y + cell / 2;
-          parts += `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`;
+          const ink = fill || '#111111';
+          parts += `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${ink}" />`;
+        } else if (kind === 'ohajiki' || kind === 'bead') {
+          const sprite = SPRITES[kind];
+          const size = cell * 0.9;
+          const offset = (cell - size) / 2;
+          const imgX = x + offset;
+          const imgY = y + offset;
+          if (sprite) {
+            const id = `sprite_${kind}_${spriteIndex}`;
+            spriteIndex += 1;
+            defs += `<mask id="${id}" maskUnits="userSpaceOnUse" mask-type="alpha">` +
+              `<image href="${sprite}" x="${imgX}" y="${imgY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />` +
+              `</mask>`;
+            parts += `<rect x="${imgX}" y="${imgY}" width="${size}" height="${size}" fill="${fill}" mask="url(#${id})" />`;
+          } else {
+            const radius = cell * 0.45;
+            const cx = x + cell / 2;
+            const cy = y + cell / 2;
+            parts += `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`;
+          }
         } else {
           const fillColor = kind === 'array' ? 'transparent' : fill;
           parts += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" fill="${fillColor}" stroke="${stroke}" stroke-width="2" rx="4" />`;
         }
       }
     }
-    const svg = svgWrap(width, height, parts);
+    const content = defs ? `<defs>${defs}</defs>${parts}` : parts;
+    const svg = svgWrap(width, height, content);
     return { svg, width, height };
+  };
+
+  const normalizeGridMeta = (item) => {
+    const kind = GRID_KINDS.has(item.svgKind)
+      ? item.svgKind
+      : (GRID_KINDS.has(item.gridKind) ? item.gridKind : 'tile');
+    item.gridKind = kind;
+    item.gridCell = clamp(parseFloat(item.gridCell) || 28, 4, 120);
+    item.gridGap = clamp(parseFloat(item.gridGap) || 6, 0, 60);
+    if (kind === 'grid') {
+      item.gridGap = 0;
+    }
+    const pad = 12;
+    const inferCount = (total) => {
+      const available = Math.max(0, total - pad * 2);
+      const denom = item.gridCell + item.gridGap;
+      if (denom <= 0) return 1;
+      const value = Math.round((available + item.gridGap) / denom);
+      return Math.max(1, value);
+    };
+    const rows = parseInt(item.gridRows, 10);
+    const cols = parseInt(item.gridCols, 10);
+    item.gridRows = Number.isFinite(rows) && rows > 0 ? rows : inferCount(item.h || 0);
+    item.gridCols = Number.isFinite(cols) && cols > 0 ? cols : inferCount(item.w || 0);
+    if (!isSafeColor(item.gridFill)) {
+      item.gridFill = (kind === 'array') ? '#111111' : '#8ecae6';
+    }
+    if (!isSafeColor(item.gridStroke)) {
+      item.gridStroke = '#1b1b1b';
+    }
+    return {
+      kind,
+      rows: item.gridRows,
+      cols: item.gridCols,
+      cell: item.gridCell,
+      gap: item.gridGap,
+      fill: item.gridFill,
+      stroke: item.gridStroke
+    };
+  };
+
+  const rebuildGridSvg = (item) => {
+    if (!item || item.type !== 'svg' || !GRID_KINDS.has(item.svgKind)) return;
+    const meta = normalizeGridMeta(item);
+    const diagram = generateGridSvg({
+      rows: meta.rows,
+      cols: meta.cols,
+      cell: meta.cell,
+      gap: meta.gap,
+      kind: meta.kind,
+      fill: meta.fill,
+      stroke: meta.stroke
+    });
+    item.svgKind = meta.kind;
+    item.svg = diagram.svg;
+    item.w = diagram.width;
+    item.h = diagram.height;
+  };
+
+  const migrateGridItems = () => {
+    let changed = false;
+    state.pages.forEach((page) => {
+      page.items.forEach((item) => {
+        if (item.type !== 'svg' || !GRID_KINDS.has(item.svgKind)) return;
+        if (item.svgKind === 'array' || item.svgKind === 'grid' || !item.svg) {
+          rebuildGridSvg(item);
+          changed = true;
+        }
+      });
+    });
+    if (changed) {
+      scheduleSave();
+    }
   };
 
   const moveLayer = (index, direction) => {
@@ -1844,10 +2098,13 @@
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="100%">${inner}</svg>`
   );
 
-  const addSvgItem = (svg, width, height, kind) => {
+  const addSvgItem = (svg, width, height, kind, meta = null) => {
     const page = getSelectedPage();
     if (!page) return;
     const item = createSvgItem(svg, width, height, kind);
+    if (meta && typeof meta === 'object') {
+      Object.assign(item, meta);
+    }
     page.items.push(item);
     state.selectedItemIds = [item.id];
     state.selectedItemId = item.id;
@@ -2566,8 +2823,19 @@
     const pageTurnBtn = $('#toggle-page-turn');
     if (pageTurnBtn) {
       pageTurnBtn.addEventListener('click', () => {
+        if (state.view.kokugoMode) return;
         state.view.pageTurn = state.view.pageTurn === 'rtl' ? 'ltr' : 'rtl';
         updateView();
+        scheduleSave();
+      });
+    }
+    const kokugoBtn = $('#toggle-kokugo');
+    if (kokugoBtn) {
+      kokugoBtn.addEventListener('click', () => {
+        state.view.kokugoMode = !state.view.kokugoMode;
+        state.view.pageTurn = state.view.kokugoMode ? 'rtl' : 'ltr';
+        updateView();
+        renderPages();
         scheduleSave();
       });
     }
@@ -2650,6 +2918,7 @@
         try {
           const data = JSON.parse(ev.target.result);
           state = normalizeState(data);
+          migrateGridItems();
           renderAll();
           scheduleSave();
           resetHistory();
@@ -2738,8 +3007,11 @@
         const kind = $('#tile-kind')?.value || 'tile';
         const cell = parseFloat($('#tile-size')?.value) || 28;
         const gap = parseFloat($('#tile-gap')?.value) || 6;
-        const fill = $('#tile-fill')?.value || '#8ecae6';
+        let fill = $('#tile-fill')?.value || '#8ecae6';
         const stroke = $('#tile-stroke')?.value || '#1b1b1b';
+        if (kind === 'array') {
+          fill = '#111111';
+        }
         const diagram = generateGridSvg({
           rows: dim.rows,
           cols: dim.cols,
@@ -2749,7 +3021,15 @@
           fill,
           stroke
         });
-        addSvgItem(diagram.svg, diagram.width, diagram.height, kind);
+        addSvgItem(diagram.svg, diagram.width, diagram.height, kind, {
+          gridKind: kind,
+          gridRows: dim.rows,
+          gridCols: dim.cols,
+          gridCell: cell,
+          gridGap: gap,
+          gridFill: fill,
+          gridStroke: stroke
+        });
       });
     }
     const drawToggle = $('#draw-toggle');
@@ -2904,6 +3184,28 @@
     $('#inspector').addEventListener('input', (e) => {
       const items = getSelectedItems();
       if (!items.length) return;
+      const gridField = e.target.dataset.gridField;
+      if (gridField) {
+        let value;
+        if (e.target.type === 'checkbox') {
+          value = e.target.checked;
+        } else if (e.target.type === 'number') {
+          value = parseFloat(e.target.value) || 0;
+        } else {
+          value = e.target.value;
+        }
+        items.forEach((item) => {
+          if (item.type !== 'svg' || !GRID_KINDS.has(item.svgKind)) return;
+          item[gridField] = value;
+          rebuildGridSvg(item);
+        });
+        renderPages();
+        renderLayers();
+        renderInspector();
+        scheduleSave();
+        scheduleHistoryPush();
+        return;
+      }
       const field = e.target.dataset.field;
       if (!field) return;
       let value;
