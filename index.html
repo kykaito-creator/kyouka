@@ -191,6 +191,21 @@
       </section>
 
       <section class="panel-section">
+        <h3>教科書部品</h3>
+        <div class="inline-row">
+          <button id="comp-title-banner" type="button">タイトルバナー</button>
+          <button id="comp-chip" type="button">色チップ</button>
+          <button id="comp-question-box" type="button">発問枠</button>
+        </div>
+        <div class="inline-row">
+          <button id="comp-guide-box" type="button">指導枠</button>
+          <button id="comp-bubble" type="button">吹き出し</button>
+          <button id="comp-answer-grid" type="button">答え枠</button>
+        </div>
+        <span class="hint">教科書らしい箱やチップ、答え枠を追加します。</span>
+      </section>
+
+      <section class="panel-section">
         <h3>数直線・分度器</h3>
         <label for="line-kind">種類</label>
         <select id="line-kind">
@@ -509,6 +524,24 @@
         <input id="book-author" type="text" placeholder="担当者名">
       </section>
 
+      <section class="panel-section" id="ai-panel">
+        <h3>AIパネル</h3>
+        <div class="hint">AIに詳しくなくてもOK。下のプロンプトをコピーしてGPT/Geminiに貼り付け、返ってきた出力を下に貼ってください。</div>
+        <label for="ai-prompt">AI用プロンプト</label>
+        <textarea id="ai-prompt" class="ai-textarea" readonly></textarea>
+        <div class="inline-row">
+          <button id="ai-copy-prompt" type="button">プロンプトをコピー</button>
+          <button id="ai-refresh-prompt" type="button">更新</button>
+        </div>
+        <label for="ai-input">AI出力を貼り付け</label>
+        <textarea id="ai-input" class="ai-textarea" placeholder="JSON または タグ形式 (#TITLE など)"></textarea>
+        <div class="inline-row">
+          <button id="ai-apply" class="primary" type="button">1ページ生成</button>
+          <button id="ai-clear" type="button">クリア</button>
+        </div>
+        <div id="ai-status" class="hint"></div>
+      </section>
+
       <section class="panel-section">
         <h3>選択中の設定</h3>
         <div id="no-selection" class="muted">未選択です。プレビューから要素をクリックしてください。</div>
@@ -601,6 +634,16 @@
               <div>
                 <label for="ins-border-width">枠線幅</label>
                 <input id="ins-border-width" type="number" data-field="borderWidth">
+              </div>
+            </div>
+            <div class="control-row">
+              <div>
+                <label for="ins-radius">角丸</label>
+                <input id="ins-radius" type="number" min="0" max="60" data-field="borderRadius">
+              </div>
+              <div>
+                <label for="ins-padding">内側余白</label>
+                <input id="ins-padding" type="number" min="0" max="40" data-field="padding">
               </div>
             </div>
             <div class="control-row">

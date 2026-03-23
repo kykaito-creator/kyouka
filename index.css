@@ -157,6 +157,58 @@ aside.collapsed .panel-header .badge {
   letter-spacing: 0.06em;
 }
 
+.panel-section.collapsible {
+  padding: 0;
+  gap: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.section-header h3 { margin: 0; }
+
+.section-body {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-section.collapsed .section-body {
+  display: none;
+}
+
+.section-toggle {
+  background: #1b1c22;
+  border: 1px solid #3b3c46;
+  color: var(--muted);
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+
+.section-toggle:hover { background: #2a2b33; }
+
+.ai-textarea {
+  min-height: 120px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  background: #16171d;
+}
+
+#ai-status {
+  min-height: 18px;
+}
+
+#ai-status.success { color: #8bd8a3; }
+#ai-status.danger { color: #ff8c8c; }
+#ai-status.info { color: var(--muted); }
+
 label {
   font-size: 0.75rem;
   color: var(--muted);

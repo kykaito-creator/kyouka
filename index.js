@@ -3,6 +3,7 @@
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const STORAGE_KEY = 'textbook_maker_state_v3';
   const LAYOUT_KEY = 'textbook_maker_layout_v3';
+  const SECTION_STATE_KEY = 'textbook_maker_sections_v1';
   const MIN_PANEL = 240;
   const MAX_PANEL = 720;
   const COLLAPSED_WIDTH = 52;
@@ -14,6 +15,9 @@
   let saveFailNotified = false;
   let persistLayout = () => {};
   let previewFullscreen = false;
+  let panelSectionState = {};
+  const panelSections = new Map();
+  const DEFAULT_OPEN_SECTIONS = new Set(['本文・ポイント', '選択中の設定']);
 
   const uid = (prefix = 'id') => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
   const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
@@ -81,6 +85,114 @@
     a.download = `textbook_project_${safeReason}_${stamp}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const loadSectionState = () => {
+    try {
+      const raw = localStorage.getItem(SECTION_STATE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (err) {
+      console.warn('セクション状態の読み込みに失敗しました。', err);
+      return {};
+    }
+  };
+
+  const saveSectionState = () => {
+    try {
+      localStorage.setItem(SECTION_STATE_KEY, JSON.stringify(panelSectionState));
+    } catch (err) {
+      console.warn('セクション状態の保存に失敗しました。', err);
+    }
+  };
+
+  const setSectionCollapsed = (section, collapsed, persist = true) => {
+    if (!section) return;
+    section.classList.toggle('collapsed', collapsed);
+    const toggle = section.querySelector('.section-toggle');
+    if (toggle) {
+      toggle.textContent = collapsed ? '展開' : '最小化';
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+    }
+    if (persist) {
+      const key = section.dataset.sectionKey;
+      if (key) {
+        panelSectionState[key] = collapsed;
+        saveSectionState();
+      }
+    }
+  };
+
+  const setupPanelSections = () => {
+    panelSectionState = loadSectionState();
+    panelSections.clear();
+    $$('.panel-section').forEach((section, index) => {
+      if (section.dataset.collapsibleReady) {
+        const titleEl = section.querySelector('h3');
+        const titleText = String(titleEl?.textContent || '').trim();
+        const key = section.dataset.sectionKey || section.id || titleText || `section-${index}`;
+        section.dataset.sectionKey = key;
+        panelSections.set(key, { section, title: titleText });
+        return;
+      }
+      const titleEl = section.querySelector('h3');
+      if (!titleEl) return;
+      const titleText = String(titleEl.textContent || '').trim();
+      const key = section.id || titleText || `section-${index}`;
+      section.dataset.sectionKey = key;
+
+      const header = document.createElement('div');
+      header.className = 'section-header';
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'section-toggle';
+      toggle.setAttribute('aria-label', `${titleText}を開閉`);
+      header.appendChild(titleEl);
+      header.appendChild(toggle);
+
+      const body = document.createElement('div');
+      body.className = 'section-body';
+      const nodes = Array.from(section.childNodes);
+      nodes.forEach((node) => {
+        if (node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) return;
+        body.appendChild(node);
+      });
+
+      section.innerHTML = '';
+      section.appendChild(header);
+      section.appendChild(body);
+      section.classList.add('collapsible');
+      section.dataset.collapsibleReady = 'true';
+
+      const collapsed = Object.prototype.hasOwnProperty.call(panelSectionState, key)
+        ? !!panelSectionState[key]
+        : !DEFAULT_OPEN_SECTIONS.has(titleText);
+      setSectionCollapsed(section, collapsed, false);
+
+      header.addEventListener('click', (e) => {
+        if (e.target.closest('.section-toggle')) return;
+        setSectionCollapsed(section, !section.classList.contains('collapsed'));
+      });
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setSectionCollapsed(section, !section.classList.contains('collapsed'));
+      });
+
+      panelSections.set(key, { section, title: titleText });
+    });
+    saveSectionState();
+  };
+
+  const ensurePanelSectionOpen = (title) => {
+    if (!title) return;
+    for (const entry of panelSections.values()) {
+      if (entry.title !== title) continue;
+      if (entry.section.classList.contains('collapsed')) {
+        setSectionCollapsed(entry.section, false);
+      }
+      break;
+    }
   };
 
   let renderQueued = false;
@@ -220,6 +332,8 @@
     bgTransparent: !!style.bgTransparent,
     borderColor: style.borderColor,
     borderWidth: style.borderWidth,
+    borderRadius: typeof style.borderRadius === 'number' ? style.borderRadius : 0,
+    padding: typeof style.padding === 'number' ? style.padding : 0,
     borderStyle: style.borderStyle || 'solid',
     textAlign: style.textAlign,
     lineHeight: style.lineHeight
@@ -250,6 +364,8 @@
     bgTransparent: !!style.bgTransparent,
     borderColor: style.borderColor,
     borderWidth: style.borderWidth,
+    borderRadius: typeof style.borderRadius === 'number' ? style.borderRadius : 0,
+    padding: typeof style.padding === 'number' ? style.padding : 0,
     borderStyle: style.borderStyle || 'solid',
     textAlign: style.textAlign,
     lineHeight: style.lineHeight
@@ -365,6 +481,8 @@
             bgTransparent: typeof item.bgTransparent === 'boolean' ? item.bgTransparent : isTransparent(item.bgColor),
             borderColor: item.borderColor || '#111111',
             borderWidth: typeof item.borderWidth === 'number' ? item.borderWidth : 0,
+            borderRadius: typeof item.borderRadius === 'number' ? item.borderRadius : 0,
+            padding: typeof item.padding === 'number' ? item.padding : 0,
             borderStyle: item.borderStyle || 'solid',
             textAlign: item.textAlign || 'left',
             lineHeight: typeof item.lineHeight === 'number' ? item.lineHeight : 1.5,
@@ -626,6 +744,17 @@
     return { marginX, marginY, maxWidth, maxHeight, lineHeightPx, maxLines, charsPerLine, maxChars };
   };
 
+  const getTextCapacityForBox = (width, height, style) => {
+    const maxWidth = Math.max(80, width);
+    const maxHeight = Math.max(80, height);
+    const lineHeightPx = Math.max(1, (style.lineHeight || 1.5) * style.fontSize);
+    const maxLines = Math.max(1, Math.floor(maxHeight / lineHeightPx));
+    const avgCharWidth = measureAverageCharWidth(style);
+    const charsPerLine = Math.max(1, Math.floor(maxWidth / avgCharWidth));
+    const maxChars = maxLines * charsPerLine;
+    return { maxWidth, maxHeight, lineHeightPx, maxLines, charsPerLine, maxChars };
+  };
+
   const wrapTextToLines = (text, maxWidth, style) => {
     const ctx = getTextMeasureContext;
     if (!ctx) return String(text || '').split(/\r?\n/);
@@ -714,6 +843,886 @@
     counter.textContent = `残り ${remaining} 文字 (最大 ${maxChars})`;
     counter.classList.toggle('over', remaining < 0);
     counter.title = '用紙サイズ・文字サイズ・行間から算出した目安です。改行を多用すると少なくなります。';
+  };
+
+  const AI_LAYOUT = {
+    marginX: 48,
+    marginY: 54,
+    gutter: 18,
+    blockGap: 12
+  };
+
+  let aiPromptTimer = null;
+
+  const getAiLayoutMetrics = (pageId, style) => {
+    const { width: pageW, height: pageH } = getPagePixelSize(pageId);
+    const usableWidth = Math.max(200, pageW - AI_LAYOUT.marginX * 2);
+    const sideWidth = Math.max(220, Math.round(pageW * 0.32));
+    const bodyWidth = Math.max(220, usableWidth - sideWidth - AI_LAYOUT.gutter);
+    const headerHeight = Math.max(96, style.fontSize * 4.4);
+    const contentHeight = Math.max(180, pageH - AI_LAYOUT.marginY - headerHeight);
+    const sideBlockHeight = Math.max(100, Math.floor((contentHeight - AI_LAYOUT.blockGap * 2) / 3));
+    return { pageW, pageH, usableWidth, bodyWidth, sideWidth, contentHeight, sideBlockHeight };
+  };
+
+  const buildAiPrompt = () => {
+    const page = getSelectedPage();
+    const style = getInsertionStyle();
+    const { bodyWidth, contentHeight, sideWidth, sideBlockHeight } = getAiLayoutMetrics(page?.id, style);
+    const bodyCap = getTextCapacityForBox(bodyWidth, contentHeight, style);
+    const sideStyle = {
+      ...style,
+      fontSize: Math.max(12, Math.round(style.fontSize * 0.9)),
+      lineHeight: 1.35
+    };
+    const sideCap = getTextCapacityForBox(sideWidth, sideBlockHeight, sideStyle);
+    const pageSizeLabel = $('#page-size')?.selectedOptions?.[0]?.textContent?.trim()
+      || state.view.pageSize
+      || 'A4 縦';
+    const project = state.project || {};
+    const subject = project.subject || '未入力';
+    const grade = project.grade || '未入力';
+    const title = project.title || '未入力';
+    const author = project.author || '未入力';
+    const bodyMax = Math.max(120, Math.floor(bodyCap.maxChars * 0.9));
+    const sideMax = Math.max(60, Math.floor(sideCap.maxChars * 0.7));
+    const bodyLineMax = Math.max(6, Math.floor(bodyCap.maxLines * 0.85));
+    const bodyLineGoal = Math.max(6, Math.floor(bodyCap.maxLines * 0.7));
+    const bodyLineChars = Math.max(10, bodyCap.charsPerLine);
+    const sideLineMax = Math.max(3, Math.floor(sideCap.maxLines * 0.8));
+    const sideLineChars = Math.max(8, sideCap.charsPerLine);
+
+    return [
+      'あなたは教科書メーカー用の1ページ素材を作ります。',
+      '最優先: 1ページに必ず収まる短さにすること。',
+      '出力形式は JSON か タグ形式のどちらか一方のみ。',
+      'JSONの場合は「JSONのみ」を出力。Markdownや説明は禁止。',
+      '',
+      `教科: ${subject}`,
+      `学年: ${grade}`,
+      `教材名: ${title}`,
+      `作成者: ${author}`,
+      `用紙: ${pageSizeLabel}`,
+      `本文フォント: ${style.fontSize}px / 行間 ${style.lineHeight}`,
+      '',
+      '分量の目安:',
+      `- 本文は最大 ${bodyMax} 文字程度`,
+      `- 本文は ${bodyLineGoal}〜${bodyLineMax} 行が目安`,
+      `- 1行は全角${bodyLineChars}文字以内 (改行で調整)`,
+      `- ポイントは最大5件 (1件${sideLineChars}文字以内)`,
+      `- 用語は最大4件 (1件${sideLineChars}文字以内)`,
+      `- 問いは最大3件 (1件${sideLineChars}文字以内)`,
+      `- 右側ボックスは合計 ${sideMax} 文字程度`,
+      `- 右側ボックスの1行は全角${sideLineChars}文字以内、最大${sideLineMax}行`,
+      '',
+      '書き方の注意:',
+      '- 長文を避け、短い文に分割する',
+      '- 箇条書きは1行で完結',
+      '- 改行を入れて読みやすくする',
+      '',
+      'page_type は次のいずれか:',
+      '- intro_visual（導入＋場面）',
+      '- example_explain（例題＋説明）',
+      '- practice（練習）',
+      '- summary（まとめ）',
+      '',
+      'JSON出力の例:',
+      '{',
+      '  "page_type": "intro_visual",',
+      '  "title": "ここにタイトル",',
+      '  "subtitle": "ここにサブタイトル",',
+      '  "visual_caption": "場面の短い説明",',
+      '  "body_lines": ["1行目", "2行目", "3行目"],',
+      '  "example_lines": ["4×3=12", "この式は..."],',
+      '  "chips": ["1つ分の数:4人", "いくつ分:3台", "ぜんぶの数:12人"],',
+      '  "points": ["ポイント1", "ポイント2"],',
+      '  "glossary": ["用語: 説明", "用語: 説明"],',
+      '  "questions": ["問い1", "問い2"]',
+      '}',
+      '',
+      'タグ形式の例:',
+      '#TITLE',
+      'ここにタイトル',
+      '#SUBTITLE',
+      'ここにサブタイトル',
+      '#BODY',
+      'ここに本文',
+      '#POINTS',
+      '- ポイント1',
+      '- ポイント2',
+      '#GLOSSARY',
+      '- 用語: 説明',
+      '#QUESTIONS',
+      '- 問い1'
+    ].join('\n');
+  };
+
+  const updateAiPrompt = () => {
+    const promptEl = $('#ai-prompt');
+    if (!promptEl) return;
+    promptEl.value = buildAiPrompt();
+  };
+
+  const scheduleAiPromptUpdate = () => {
+    clearTimeout(aiPromptTimer);
+    aiPromptTimer = setTimeout(updateAiPrompt, 120);
+  };
+
+  const stripBullet = (text) => String(text || '')
+    .replace(/^\s*[-*・●]\s*/, '')
+    .replace(/^\s*\d+[.)]\s*/, '')
+    .trim();
+
+  const normalizeAiList = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return value.map(stripBullet).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      return value.split(/\r?\n/).map(stripBullet).filter(Boolean);
+    }
+    if (typeof value === 'object') {
+      return Object.values(value).map(stripBullet).filter(Boolean);
+    }
+    return [stripBullet(value)].filter(Boolean);
+  };
+
+  const parseGlossaryEntry = (raw) => {
+    const cleaned = stripBullet(raw);
+    if (!cleaned) return null;
+    const match = cleaned.split(/[:：\-–—]/);
+    if (match.length >= 2) {
+      const term = match.shift().trim();
+      const def = match.join(':').trim();
+      if (!term) return null;
+      return { term, def };
+    }
+    return { term: cleaned, def: '' };
+  };
+
+  const normalizeGlossaryList = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return value.map((entry) => {
+        if (typeof entry === 'string') return parseGlossaryEntry(entry);
+        if (entry && typeof entry === 'object') {
+          const term = entry.term || entry.word || entry.title || entry.name;
+          const def = entry.def || entry.definition || entry.desc || entry.meaning || '';
+          if (!term) return null;
+          return { term: String(term).trim(), def: String(def || '').trim() };
+        }
+        return null;
+      }).filter(Boolean);
+    }
+    if (typeof value === 'object') {
+      return Object.entries(value).map(([term, def]) => ({
+        term: String(term).trim(),
+        def: String(def || '').trim()
+      })).filter(entry => entry.term);
+    }
+    if (typeof value === 'string') {
+      return value.split(/\r?\n/).map(parseGlossaryEntry).filter(Boolean);
+    }
+    return [];
+  };
+
+  const parseAiTagged = (text) => {
+    const result = { title: '', subtitle: '', body: '', points: [], glossary: [], questions: [], chips: [], exampleLines: [] };
+    const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+    let current = '';
+    lines.forEach((line) => {
+      const tag = line.trim().match(/^#\s*(TITLE|SUBTITLE|BODY|POINTS|GLOSSARY|QUESTIONS|CHIPS|EXAMPLE)\b/i);
+      if (tag) {
+        current = tag[1].toUpperCase();
+        return;
+      }
+      if (!current) return;
+      if (current === 'TITLE') {
+        result.title = [result.title, line].filter(Boolean).join('\n').trim();
+        return;
+      }
+      if (current === 'SUBTITLE') {
+        result.subtitle = [result.subtitle, line].filter(Boolean).join('\n').trim();
+        return;
+      }
+      if (current === 'BODY') {
+        result.body = [result.body, line].filter(Boolean).join('\n').trim();
+        return;
+      }
+      if (current === 'POINTS') {
+        const item = stripBullet(line);
+        if (item) result.points.push(item);
+        return;
+      }
+      if (current === 'GLOSSARY') {
+        const entry = parseGlossaryEntry(line);
+        if (entry) result.glossary.push(entry);
+        return;
+      }
+      if (current === 'QUESTIONS') {
+        const item = stripBullet(line);
+        if (item) result.questions.push(item);
+        return;
+      }
+      if (current === 'CHIPS') {
+        const item = stripBullet(line);
+        if (item) result.chips.push(item);
+        return;
+      }
+      if (current === 'EXAMPLE') {
+        const value = String(line || '').trim();
+        if (value) result.exampleLines.push(value);
+      }
+    });
+    return result;
+  };
+
+  const normalizeAiData = (raw) => {
+    if (!raw || typeof raw !== 'object') {
+      const bodyText = typeof raw === 'string' ? raw : '';
+      return { title: '', subtitle: '', body: bodyText, points: [], glossary: [], questions: [] };
+    }
+    const pick = (keys) => {
+      for (const key of keys) {
+        if (raw[key]) return raw[key];
+      }
+      return '';
+    };
+    const pageTypeRaw = pick(['page_type', 'pageType', 'layout', 'template', 'type']);
+    const title = pick(['title', 'TITLE', 'headline', 'theme']);
+    const subtitle = pick(['subtitle', 'subTitle', 'lead', 'catch']);
+    let body = pick(['body', 'text', 'content', 'main', 'description', 'lesson', 'bodyLines', 'body_lines']);
+    if (Array.isArray(body)) {
+      body = body.map(line => String(line || '').trim()).filter(Boolean).join('\n');
+    } else if (body && typeof body === 'object') {
+      body = Object.values(body).map(line => String(line || '').trim()).filter(Boolean).join('\n');
+    }
+    const points = normalizeAiList(pick(['points', 'point', 'keypoints', 'highlights']));
+    const glossary = normalizeGlossaryList(pick(['glossary', 'terms', 'vocabulary', 'words']));
+    const questions = normalizeAiList(pick(['questions', 'question', 'exercises', 'quiz', 'checks', 'practice']));
+    const visualCaption = pick(['visual_caption', 'visual', 'scene', 'image_caption', 'image']);
+    const exampleRaw = pick(['example', 'example_lines', 'exampleLines']);
+    const chips = normalizeAiList(pick(['chips', 'labels', 'key_labels']));
+    let exampleLines = [];
+    if (Array.isArray(exampleRaw)) {
+      exampleLines = exampleRaw.map(line => String(line || '').trim()).filter(Boolean);
+    } else if (typeof exampleRaw === 'string') {
+      exampleLines = exampleRaw.split(/\r?\n/).map(line => String(line || '').trim()).filter(Boolean);
+    } else if (exampleRaw && typeof exampleRaw === 'object') {
+      exampleLines = Object.values(exampleRaw).map(line => String(line || '').trim()).filter(Boolean);
+    }
+    const pageType = String(pageTypeRaw || '').trim().toLowerCase();
+    return {
+      pageType,
+      title: String(title || '').trim(),
+      subtitle: String(subtitle || '').trim(),
+      body: String(body || '').trim(),
+      points,
+      glossary,
+      questions,
+      visualCaption: String(visualCaption || '').trim(),
+      exampleLines,
+      chips
+    };
+  };
+
+  const parseAiInput = (raw) => {
+    if (!raw) return null;
+    let text = String(raw || '').trim();
+    if (!text) return null;
+    const fence = text.match(/```(?:json|text)?\s*([\s\S]*?)```/i);
+    if (fence) {
+      text = fence[1].trim();
+    }
+    let parsed = null;
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        parsed = JSON.parse(text);
+      } catch (err) {
+        parsed = null;
+      }
+    }
+    if (!parsed) {
+      const start = text.indexOf('{');
+      const end = text.lastIndexOf('}');
+      if (start !== -1 && end > start) {
+        const candidate = text.slice(start, end + 1);
+        try {
+          parsed = JSON.parse(candidate);
+        } catch (err) {
+          parsed = null;
+        }
+      }
+    }
+    if (parsed) return normalizeAiData(parsed);
+    return normalizeAiData(parseAiTagged(text));
+  };
+
+  const setAiStatus = (message, type = 'info') => {
+    const status = $('#ai-status');
+    if (!status) return;
+    status.textContent = message || '';
+    status.classList.remove('success', 'danger', 'info');
+    status.classList.add(type);
+  };
+
+  const copyToClipboard = async (text) => {
+    if (!text) return false;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (err) {
+        console.warn('クリップボードのコピーに失敗しました。', err);
+      }
+    }
+    const temp = document.createElement('textarea');
+    temp.value = text;
+    temp.setAttribute('readonly', 'true');
+    temp.style.position = 'fixed';
+    temp.style.left = '-9999px';
+    document.body.appendChild(temp);
+    temp.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch (err) {
+      ok = false;
+    }
+    temp.remove();
+    return ok;
+  };
+
+  const insertPageAfterSelected = () => {
+    const next = createPage(state.pages.length + 1);
+    const idx = state.pages.findIndex(p => p.id === state.selectedPageId);
+    const insertAt = idx === -1 ? state.pages.length : idx + 1;
+    state.pages.splice(insertAt, 0, next);
+    state.selectedPageId = next.id;
+    return next;
+  };
+
+  const buildBulletLines = (items, prefix = '・') => items.map(item => `${prefix}${item}`).join('\n');
+
+  const trimLinesToFit = (text, maxWidth, style, maxLines) => {
+    const lines = wrapTextToLines(text, maxWidth, style);
+    if (lines.length <= maxLines) {
+      return { text, trimmed: false, lines };
+    }
+    const trimmedLines = lines.slice(0, Math.max(1, maxLines));
+    let last = trimmedLines[trimmedLines.length - 1] || '';
+    const ellipsis = '…';
+    if (!last.endsWith(ellipsis)) {
+      last = last.trim();
+      if (last.length > 1) {
+        last = last.slice(0, Math.max(1, last.length - 1)) + ellipsis;
+      } else {
+        last = ellipsis;
+      }
+      trimmedLines[trimmedLines.length - 1] = last;
+    }
+    return { text: trimmedLines.join('\n'), trimmed: true, lines: trimmedLines };
+  };
+
+  const buildPresetStyle = (baseStyle, overrides = {}) => ({
+    ...baseStyle,
+    ...overrides,
+    bgTransparent: typeof overrides.bgTransparent === 'boolean' ? overrides.bgTransparent : (baseStyle.bgTransparent ?? true),
+    borderWidth: typeof overrides.borderWidth === 'number' ? overrides.borderWidth : (baseStyle.borderWidth ?? 0),
+    borderRadius: typeof overrides.borderRadius === 'number' ? overrides.borderRadius : (baseStyle.borderRadius ?? 0),
+    padding: typeof overrides.padding === 'number' ? overrides.padding : (baseStyle.padding ?? 0),
+    borderStyle: overrides.borderStyle || baseStyle.borderStyle || 'solid'
+  });
+
+  const calcTextHeight = (lines, style) => {
+    const lineHeightPx = (style.lineHeight || 1.4) * style.fontSize;
+    return lines.length * lineHeightPx + (style.padding || 0) * 2 + 6;
+  };
+
+  const placeTextItem = (page, text, style, rect, warnings, label) => {
+    const safeText = String(text || '').trim() || ' ';
+    const pad = style.padding || 0;
+    const innerWidth = Math.max(40, rect.w - pad * 2);
+    const innerHeight = Math.max(40, rect.h - pad * 2);
+    const cap = getTextCapacityForBox(innerWidth, innerHeight, style);
+    const fit = trimLinesToFit(safeText, innerWidth, style, cap.maxLines);
+    if (fit.trimmed && warnings && label) {
+      warnings.push(`${label}を短く省略しました。`);
+    }
+    const item = createTextItem(fit.text, style, 'text');
+    item.x = rect.x;
+    item.y = rect.y;
+    item.w = rect.w;
+    item.h = rect.h;
+    page.items.push(item);
+    return { item, fit };
+  };
+
+  const addTitleBannerItem = (page, text, baseStyle, x, y, width, warnings) => {
+    const style = buildPresetStyle(baseStyle, {
+      fontSize: Math.round(baseStyle.fontSize * 1.5),
+      bold: true,
+      lineHeight: 1.2,
+      bgTransparent: false,
+      bgColor: '#fff2d8',
+      borderColor: '#e0b35a',
+      borderWidth: 2,
+      borderRadius: 16,
+      padding: 8,
+      textAlign: 'left'
+    });
+    const innerWidth = Math.max(40, width - (style.padding || 0) * 2);
+    const fit = trimLinesToFit(text || 'タイトル', innerWidth, style, 2);
+    if (fit.trimmed && warnings) warnings.push('タイトルを短く省略しました。');
+    const height = Math.max(40, calcTextHeight(fit.lines, style));
+    const item = createTextItem(fit.text, style, 'text');
+    item.x = x;
+    item.y = y;
+    item.w = width;
+    item.h = height;
+    page.items.push(item);
+    return height;
+  };
+
+  const addVisualFrame = (page, caption, baseStyle, x, y, width, height) => {
+    const frame = createShapeItem('rect');
+    frame.x = x;
+    frame.y = y;
+    frame.w = width;
+    frame.h = height;
+    frame.bgColor = '#f4f6f9';
+    frame.borderColor = '#c7ced6';
+    frame.borderWidth = 2;
+    page.items.push(frame);
+
+    const labelStyle = buildPresetStyle(baseStyle, {
+      fontSize: Math.max(12, Math.round(baseStyle.fontSize * 0.9)),
+      bold: true,
+      color: '#5b6572',
+      bgTransparent: true,
+      borderWidth: 0,
+      padding: 0,
+      textAlign: 'center',
+      lineHeight: 1.2
+    });
+    const labelText = caption || '場面図';
+    const labelItem = createTextItem(labelText, labelStyle, 'text');
+    labelItem.x = x;
+    labelItem.y = y + height / 2 - 18;
+    labelItem.w = width;
+    labelItem.h = 36;
+    page.items.push(labelItem);
+  };
+
+  const addChipRow = (page, chips, baseStyle, x, y, maxWidth) => {
+    const items = Array.isArray(chips) ? chips.filter(Boolean) : [];
+    if (!items.length) return 0;
+    const style = buildPresetStyle(baseStyle, {
+      fontSize: Math.max(12, Math.round(baseStyle.fontSize * 0.85)),
+      bold: true,
+      bgTransparent: false,
+      bgColor: '#dfeaff',
+      borderColor: '#7aa7e6',
+      borderWidth: 1,
+      borderRadius: 999,
+      padding: 6,
+      textAlign: 'center',
+      lineHeight: 1.2
+    });
+    let cursorX = x;
+    let cursorY = y;
+    let rowHeight = 0;
+    const gap = 6;
+    items.forEach((raw) => {
+      const text = String(raw || '').trim();
+      if (!text) return;
+      const width = Math.max(64, measureAverageCharWidth(style) * text.length + (style.padding || 0) * 2 + 18);
+      const height = Math.max(28, style.fontSize * 1.4 + (style.padding || 0) * 2);
+      if (cursorX + width > x + maxWidth) {
+        cursorX = x;
+        cursorY += rowHeight + gap;
+        rowHeight = 0;
+      }
+      const item = createTextItem(text, style, 'text');
+      item.x = cursorX;
+      item.y = cursorY;
+      item.w = width;
+      item.h = height;
+      page.items.push(item);
+      cursorX += width + gap;
+      rowHeight = Math.max(rowHeight, height);
+    });
+    return (cursorY - y) + rowHeight;
+  };
+
+  const addStackedBoxes = (page, boxes, baseStyle, x, y, width, height, warnings) => {
+    const rows = Array.isArray(boxes) ? boxes.filter(box => box && box.text) : [];
+    if (!rows.length) return;
+    const gap = AI_LAYOUT.blockGap;
+    const boxHeight = Math.max(90, Math.floor((height - gap * (rows.length - 1)) / rows.length));
+    let cursorY = y;
+    rows.forEach((box) => {
+      const style = buildPresetStyle(baseStyle, box.style || {});
+      const title = box.title ? `${box.title}\n` : '';
+      placeTextItem(page, `${title}${box.text}`, style, { x, y: cursorY, w: width, h: boxHeight }, warnings, box.title || 'ボックス');
+      cursorY += boxHeight + gap;
+    });
+  };
+
+  const normalizePageType = (raw) => {
+    const text = String(raw || '').trim().toLowerCase();
+    if (!text) return '';
+    if (['intro_visual','intro','scene','scene_intro','導入','場面','場面提示','導入場面'].includes(text)) return 'intro_visual';
+    if (['example_explain','example','explain','例題','説明','解説','例'].includes(text)) return 'example_explain';
+    if (['practice','exercise','drill','練習','演習','問題'].includes(text)) return 'practice';
+    if (['summary','review','まとめ','要点','振り返り'].includes(text)) return 'summary';
+    return text;
+  };
+
+  const applyAiTemplateIntro = (page, data, baseStyle, warnings) => {
+    const { width: pageW, height: pageH } = getPagePixelSize(page.id);
+    const marginX = AI_LAYOUT.marginX;
+    const marginY = AI_LAYOUT.marginY;
+    const usableWidth = Math.max(200, pageW - marginX * 2);
+    let cursorY = marginY;
+    const titleHeight = addTitleBannerItem(page, data.title || 'タイトル', baseStyle, marginX, cursorY, usableWidth, warnings);
+    cursorY += titleHeight + 12;
+
+    const visualHeight = Math.min(420, Math.max(220, pageH * 0.36));
+    addVisualFrame(page, data.visualCaption || '場面図', baseStyle, marginX, cursorY, usableWidth, visualHeight);
+    cursorY += visualHeight + 12;
+
+    const contentHeight = Math.max(160, pageH - marginY - cursorY);
+    const hasSide = data.points.length || data.glossary.length || data.questions.length;
+    const sideWidth = hasSide ? Math.max(220, Math.round(pageW * 0.32)) : 0;
+    const bodyWidth = hasSide ? Math.max(220, usableWidth - sideWidth - AI_LAYOUT.gutter) : usableWidth;
+    const bodyRect = { x: marginX, y: cursorY, w: bodyWidth, h: contentHeight };
+    const bodyStyle = buildPresetStyle(baseStyle, { bgTransparent: true, borderWidth: 0, padding: 0 });
+    placeTextItem(page, data.body || '本文', bodyStyle, bodyRect, warnings, '本文');
+
+    if (hasSide) {
+      const boxX = marginX + bodyWidth + AI_LAYOUT.gutter;
+      const boxes = [];
+      if (data.points.length) {
+        boxes.push({
+          title: 'ポイント',
+          text: buildBulletLines(data.points),
+          style: { bgTransparent: false, bgColor: '#fff5cc', borderColor: '#f4c542', borderWidth: 2, borderRadius: 12, padding: 8, bold: true }
+        });
+      }
+      if (data.glossary.length) {
+        const lines = data.glossary.map(entry => {
+          const term = String(entry.term || '').trim();
+          const def = String(entry.def || '').trim();
+          return def ? `${term}：${def}` : term;
+        }).filter(Boolean);
+        boxes.push({
+          title: '用語',
+          text: buildBulletLines(lines),
+          style: { bgTransparent: false, bgColor: '#e8f4ff', borderColor: '#4aa3ff', borderWidth: 2, borderRadius: 12, padding: 8, bold: true }
+        });
+      }
+      if (data.questions.length) {
+        boxes.push({
+          title: '問い',
+          text: buildBulletLines(data.questions),
+          style: { bgTransparent: false, bgColor: '#f2f2f2', borderColor: '#bdbdbd', borderWidth: 2, borderRadius: 12, padding: 8, bold: true }
+        });
+      }
+      addStackedBoxes(page, boxes, baseStyle, boxX, cursorY, sideWidth, contentHeight, warnings);
+    }
+  };
+
+  const applyAiTemplateExample = (page, data, baseStyle, warnings) => {
+    const { width: pageW, height: pageH } = getPagePixelSize(page.id);
+    const marginX = AI_LAYOUT.marginX;
+    const marginY = AI_LAYOUT.marginY;
+    const usableWidth = Math.max(200, pageW - marginX * 2);
+    let cursorY = marginY;
+    const titleHeight = addTitleBannerItem(page, data.title || 'タイトル', baseStyle, marginX, cursorY, usableWidth, warnings);
+    cursorY += titleHeight + 10;
+
+    const exampleText = data.exampleLines.length ? data.exampleLines.join('\n') : (data.body.split('\n')[0] || '例: 3×4=12');
+    const exampleStyle = buildPresetStyle(baseStyle, {
+      fontSize: Math.round(baseStyle.fontSize * 1.1),
+      bold: true,
+      bgTransparent: false,
+      bgColor: '#eef4ff',
+      borderColor: '#7ea6e6',
+      borderWidth: 2,
+      borderRadius: 12,
+      padding: 10,
+      textAlign: 'center',
+      lineHeight: 1.3
+    });
+    const exampleRect = { x: marginX, y: cursorY, w: usableWidth, h: Math.max(110, baseStyle.fontSize * 5) };
+    placeTextItem(page, exampleText, exampleStyle, exampleRect, warnings, '例題');
+    cursorY += exampleRect.h + 8;
+
+    if (data.chips.length) {
+      const chipHeight = addChipRow(page, data.chips, baseStyle, marginX, cursorY, usableWidth);
+      cursorY += chipHeight + 8;
+    }
+
+    const contentHeight = Math.max(160, pageH - marginY - cursorY);
+    const hasSide = data.points.length || data.glossary.length || data.questions.length;
+    const sideWidth = hasSide ? Math.max(220, Math.round(pageW * 0.32)) : 0;
+    const bodyWidth = hasSide ? Math.max(220, usableWidth - sideWidth - AI_LAYOUT.gutter) : usableWidth;
+    const bodyStyle = buildPresetStyle(baseStyle, { bgTransparent: true, borderWidth: 0, padding: 0 });
+    placeTextItem(page, data.body || '説明文', bodyStyle, { x: marginX, y: cursorY, w: bodyWidth, h: contentHeight }, warnings, '本文');
+
+    if (hasSide) {
+      const boxX = marginX + bodyWidth + AI_LAYOUT.gutter;
+      const boxes = [];
+      if (data.points.length) {
+        boxes.push({
+          title: 'ポイント',
+          text: buildBulletLines(data.points),
+          style: { bgTransparent: false, bgColor: '#fff5cc', borderColor: '#f4c542', borderWidth: 2, borderRadius: 12, padding: 8, bold: true }
+        });
+      }
+      if (data.questions.length) {
+        boxes.push({
+          title: '問い',
+          text: buildBulletLines(data.questions),
+          style: { bgTransparent: false, bgColor: '#f2f2f2', borderColor: '#bdbdbd', borderWidth: 2, borderRadius: 12, padding: 8, bold: true }
+        });
+      }
+      addStackedBoxes(page, boxes, baseStyle, boxX, cursorY, sideWidth, contentHeight, warnings);
+    }
+  };
+
+  const applyAiTemplatePractice = (page, data, baseStyle, warnings) => {
+    const { width: pageW, height: pageH } = getPagePixelSize(page.id);
+    const marginX = AI_LAYOUT.marginX;
+    const marginY = AI_LAYOUT.marginY;
+    const usableWidth = Math.max(200, pageW - marginX * 2);
+    let cursorY = marginY;
+    const titleHeight = addTitleBannerItem(page, data.title || '練習', baseStyle, marginX, cursorY, usableWidth, warnings);
+    cursorY += titleHeight + 10;
+
+    const instructionStyle = buildPresetStyle(baseStyle, { bgTransparent: true, borderWidth: 0, padding: 0 });
+    const instructionRect = { x: marginX, y: cursorY, w: usableWidth, h: Math.max(70, baseStyle.fontSize * 3.5) };
+    placeTextItem(page, data.body || '問題に取り組みましょう。', instructionStyle, instructionRect, warnings, '指示文');
+    cursorY += instructionRect.h + 10;
+
+    const gridRows = 3;
+    const gridCols = 3;
+    const cell = Math.max(42, Math.round(baseStyle.fontSize * 2.3));
+    const gridDiagram = generateGridSvg({
+      rows: gridRows,
+      cols: gridCols,
+      cell,
+      gap: 8,
+      kind: 'grid',
+      fill: 'transparent',
+      stroke: '#7c8aa0'
+    });
+    const gridItem = createSvgItem(gridDiagram.svg, gridDiagram.width, gridDiagram.height, 'grid');
+    gridItem.x = marginX;
+    gridItem.y = cursorY;
+    page.items.push(gridItem);
+
+    const rightX = marginX + gridDiagram.width + AI_LAYOUT.gutter;
+    const rightWidth = Math.max(180, usableWidth - gridDiagram.width - AI_LAYOUT.gutter);
+    const rightHeight = Math.max(140, pageH - marginY - cursorY);
+    if (data.questions.length) {
+      const boxStyle = buildPresetStyle(baseStyle, {
+        bgTransparent: false,
+        bgColor: '#f2f2f2',
+        borderColor: '#bdbdbd',
+        borderWidth: 2,
+        borderRadius: 12,
+        padding: 8,
+        bold: true
+      });
+      placeTextItem(page, `問い\n${buildBulletLines(data.questions)}`, boxStyle, { x: rightX, y: cursorY, w: rightWidth, h: rightHeight }, warnings, '問い');
+    } else if (data.points.length) {
+      const boxStyle = buildPresetStyle(baseStyle, {
+        bgTransparent: false,
+        bgColor: '#fff5cc',
+        borderColor: '#f4c542',
+        borderWidth: 2,
+        borderRadius: 12,
+        padding: 8,
+        bold: true
+      });
+      placeTextItem(page, `ポイント\n${buildBulletLines(data.points)}`, boxStyle, { x: rightX, y: cursorY, w: rightWidth, h: rightHeight }, warnings, 'ポイント');
+    }
+  };
+
+  const applyAiTemplateSummary = (page, data, baseStyle, warnings) => {
+    const { width: pageW, height: pageH } = getPagePixelSize(page.id);
+    const marginX = AI_LAYOUT.marginX;
+    const marginY = AI_LAYOUT.marginY;
+    const usableWidth = Math.max(200, pageW - marginX * 2);
+    let cursorY = marginY;
+    const titleHeight = addTitleBannerItem(page, data.title || 'まとめ', baseStyle, marginX, cursorY, usableWidth, warnings);
+    cursorY += titleHeight + 12;
+
+    const contentHeight = Math.max(200, pageH - marginY - cursorY);
+    const hasQuestions = data.questions.length > 0;
+    const mainHeight = hasQuestions
+      ? Math.max(120, Math.floor((contentHeight - AI_LAYOUT.blockGap) * 0.65))
+      : contentHeight;
+    const mainStyle = buildPresetStyle(baseStyle, {
+      bgTransparent: false,
+      bgColor: '#e8f4ff',
+      borderColor: '#4aa3ff',
+      borderWidth: 2,
+      borderRadius: 12,
+      padding: 10,
+      bold: true
+    });
+    const mainText = data.points.length ? buildBulletLines(data.points) : (data.body || 'まとめの文章');
+    placeTextItem(page, `まとめ\n${mainText}`, mainStyle, { x: marginX, y: cursorY, w: usableWidth, h: mainHeight }, warnings, 'まとめ');
+
+    if (hasQuestions) {
+      const qStyle = buildPresetStyle(baseStyle, {
+        bgTransparent: false,
+        bgColor: '#f2f2f2',
+        borderColor: '#bdbdbd',
+        borderWidth: 2,
+        borderRadius: 12,
+        padding: 8,
+        bold: true
+      });
+      const qY = cursorY + mainHeight + AI_LAYOUT.blockGap;
+      const qH = Math.max(90, contentHeight - mainHeight - AI_LAYOUT.blockGap);
+      placeTextItem(page, `問い\n${buildBulletLines(data.questions)}`, qStyle, { x: marginX, y: qY, w: usableWidth, h: qH }, warnings, '問い');
+    }
+  };
+
+  const applyAiTemplateGeneric = (page, data, baseStyle, warnings) => {
+    const { width: pageW, height: pageH } = getPagePixelSize(page.id);
+    const usableWidth = Math.max(200, pageW - AI_LAYOUT.marginX * 2);
+    let cursorY = AI_LAYOUT.marginY;
+    const titleHeight = addTitleBannerItem(page, data.title || 'タイトル', baseStyle, AI_LAYOUT.marginX, cursorY, usableWidth, warnings);
+    cursorY += titleHeight + 10;
+    const contentHeight = Math.max(180, pageH - AI_LAYOUT.marginY - cursorY);
+    const hasSide = data.points.length || data.glossary.length || data.questions.length;
+    const sideWidth = hasSide ? Math.max(220, Math.round(pageW * 0.32)) : 0;
+    const bodyWidth = hasSide ? Math.max(220, usableWidth - sideWidth - AI_LAYOUT.gutter) : usableWidth;
+
+    const bodyStyle = buildPresetStyle(baseStyle, { bgTransparent: true, borderWidth: 0, padding: 0 });
+    placeTextItem(page, data.body || '本文', bodyStyle, { x: AI_LAYOUT.marginX, y: cursorY, w: bodyWidth, h: contentHeight }, warnings, '本文');
+
+    if (hasSide) {
+      const boxX = AI_LAYOUT.marginX + bodyWidth + AI_LAYOUT.gutter;
+      const boxes = [];
+      if (data.points.length) {
+        boxes.push({
+          title: 'ポイント',
+          text: buildBulletLines(data.points),
+          style: { bgTransparent: false, bgColor: '#fff5cc', borderColor: '#f4c542', borderWidth: 2, borderRadius: 12, padding: 8, bold: true }
+        });
+      }
+      if (data.glossary.length) {
+        const lines = data.glossary.map(entry => {
+          const term = String(entry.term || '').trim();
+          const def = String(entry.def || '').trim();
+          return def ? `${term}：${def}` : term;
+        }).filter(Boolean);
+        boxes.push({
+          title: '用語',
+          text: buildBulletLines(lines),
+          style: { bgTransparent: false, bgColor: '#e8f4ff', borderColor: '#4aa3ff', borderWidth: 2, borderRadius: 12, padding: 8, bold: true }
+        });
+      }
+      if (data.questions.length) {
+        boxes.push({
+          title: '問い',
+          text: buildBulletLines(data.questions),
+          style: { bgTransparent: false, bgColor: '#f2f2f2', borderColor: '#bdbdbd', borderWidth: 2, borderRadius: 12, padding: 8, bold: true }
+        });
+      }
+      addStackedBoxes(page, boxes, baseStyle, boxX, cursorY, sideWidth, contentHeight, warnings);
+    }
+  };
+
+  const applyAiContent = (data) => {
+    if (!data) {
+      setAiStatus('AI出力が空です。', 'danger');
+      return;
+    }
+    const title = String(data.title || '').trim();
+    const subtitle = String(data.subtitle || '').trim();
+    const body = String(data.body || '').trim();
+    let points = Array.isArray(data.points) ? data.points : [];
+    let glossary = Array.isArray(data.glossary) ? data.glossary : [];
+    let questions = Array.isArray(data.questions) ? data.questions : [];
+    if (!title && !subtitle && !body && !points.length && !glossary.length && !questions.length) {
+      setAiStatus('AI出力の内容が見つかりませんでした。', 'danger');
+      return;
+    }
+
+    const page = insertPageAfterSelected();
+    const baseStyle = getInsertionStyle();
+    const warnings = [];
+    const maxPointCount = 5;
+    const maxGlossaryCount = 4;
+    const maxQuestionCount = 3;
+    if (points.length > maxPointCount) {
+      points = points.slice(0, maxPointCount);
+      warnings.push('ポイントを一部省略しました。');
+    }
+    if (glossary.length > maxGlossaryCount) {
+      glossary = glossary.slice(0, maxGlossaryCount);
+      warnings.push('用語を一部省略しました。');
+    }
+    if (questions.length > maxQuestionCount) {
+      questions = questions.slice(0, maxQuestionCount);
+      warnings.push('問いを一部省略しました。');
+    }
+
+    const mergedTitle = title && subtitle ? `${title}\n${subtitle}` : (title || subtitle || '');
+    const payload = {
+      ...data,
+      title: mergedTitle || 'タイトル',
+      subtitle,
+      body,
+      points,
+      glossary,
+      questions
+    };
+    let pageType = normalizePageType(payload.pageType || payload.page_type);
+    if (!pageType) {
+      if (payload.visualCaption) pageType = 'intro_visual';
+      else if (payload.exampleLines?.length || payload.chips?.length) pageType = 'example_explain';
+      else if (payload.questions?.length && !payload.body) pageType = 'practice';
+      else if (payload.points?.length && !payload.body) pageType = 'summary';
+      else pageType = 'generic';
+    }
+
+    if (pageType === 'intro_visual') {
+      applyAiTemplateIntro(page, payload, baseStyle, warnings);
+    } else if (pageType === 'example_explain') {
+      applyAiTemplateExample(page, payload, baseStyle, warnings);
+    } else if (pageType === 'practice') {
+      applyAiTemplatePractice(page, payload, baseStyle, warnings);
+    } else if (pageType === 'summary') {
+      applyAiTemplateSummary(page, payload, baseStyle, warnings);
+    } else {
+      applyAiTemplateGeneric(page, payload, baseStyle, warnings);
+    }
+
+    const lastItem = page.items[page.items.length - 1];
+    if (lastItem) {
+      state.selectedItemIds = [lastItem.id];
+      state.selectedItemId = lastItem.id;
+    }
+
+    renderAll();
+    scheduleSave();
+    pushHistory();
+
+    if (warnings.length) {
+      setAiStatus(warnings.join(' / '), 'info');
+      showToast('AIページを追加しました。', 'success');
+    } else {
+      setAiStatus('AIページを追加しました。', 'success');
+      showToast('AIページを追加しました。', 'success');
+    }
   };
 
   const PAGE_SIZES = {
@@ -980,6 +1989,9 @@
     el.style.background = item.bgTransparent ? 'transparent' : (item.bgColor || 'transparent');
     const borderStyle = item.borderStyle || 'solid';
     el.style.border = item.borderWidth > 0 ? `${item.borderWidth}px ${borderStyle} ${item.borderColor}` : 'none';
+    el.style.borderRadius = item.borderRadius ? `${item.borderRadius}px` : '0px';
+    el.style.padding = `${item.padding || 0}px`;
+    el.style.boxSizing = 'border-box';
     el.style.textAlign = item.textAlign;
     el.style.lineHeight = item.lineHeight;
   };
@@ -1362,6 +2374,7 @@
     inspector.style.flexDirection = 'column';
     inspector.style.gap = '10px';
     noSel.style.display = 'none';
+    ensurePanelSectionOpen('選択中の設定');
 
     $('#ins-x').value = Math.round(item.x);
     $('#ins-y').value = Math.round(item.y);
@@ -1404,6 +2417,8 @@
       $('#ins-bg-transparent').checked = !!item.bgTransparent;
       $('#ins-border-color').value = item.borderColor || '#111111';
       $('#ins-border-width').value = item.borderWidth || 0;
+      $('#ins-radius').value = typeof item.borderRadius === 'number' ? item.borderRadius : 0;
+      $('#ins-padding').value = typeof item.padding === 'number' ? item.padding : 0;
       $('#ins-align').value = item.textAlign || 'left';
       $('#ins-line').value = item.lineHeight || 1.5;
     } else {
@@ -1546,6 +2561,7 @@
     renderInspector();
     renderSupport();
     updateMainTextCounter();
+    scheduleAiPromptUpdate();
   };
 
   const getNextPageIndex = (currentIndex, direction) => {
@@ -1637,6 +2653,8 @@
     bgTransparent: $('#bg-transparent')?.checked ?? true,
     borderColor: $('#border-color').value,
     borderWidth: parseInt($('#border-width').value, 10) || 0,
+    borderRadius: 0,
+    padding: 0,
     borderStyle: 'solid',
     textAlign: $('#text-align').value,
     lineHeight: parseFloat($('#line-height').value) || 1.5
@@ -1784,7 +2802,7 @@
 
   const TEXT_FIELDS = new Set([
     'text','fontFamily','fontSize','bold','underline','italic','vertical','textOrientation','textCombine','textCombineDigits','color',
-    'bgColor','bgTransparent','borderColor','borderWidth','textAlign','lineHeight'
+    'bgColor','bgTransparent','borderColor','borderWidth','borderRadius','padding','textAlign','lineHeight'
   ]);
   const MATH_FIELDS = new Set(['latex','mathColor','mathBold','mathItalic','mathUnderline','mathSize']);
   const DRAW_FIELDS = new Set([
@@ -1793,7 +2811,7 @@
     'arcLabelBgEnabled','arcLabelBgColor','arcLabelBgOpacity','arcLabelPadding'
   ]);
   const NUM_FIELDS = new Set([
-    'x','y','w','h','rotation','opacity','fontSize','borderWidth','lineHeight','strokeWidth','fillOpacity','mathSize','textCombineDigits',
+    'x','y','w','h','rotation','opacity','fontSize','borderWidth','borderRadius','padding','lineHeight','strokeWidth','fillOpacity','mathSize','textCombineDigits',
     'arcLabelSize','arcLabelBgOpacity','arcLabelPadding'
   ]);
   const CLAMP_0_1_FIELDS = new Set(['opacity','fillOpacity']);
@@ -1949,6 +2967,150 @@
     const item = createTextItem(preset.text, style, 'text');
     item.w = preset.w;
     item.h = preset.h;
+    page.items.push(item);
+    state.selectedItemIds = [item.id];
+    state.selectedItemId = item.id;
+    renderAll();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const getAutoPlace = () => {
+    const page = getSelectedPage();
+    const count = page?.items?.length || 0;
+    const offset = (count % 6) * 18;
+    return { x: 40 + offset, y: 60 + offset };
+  };
+
+  const addComponentTitleBanner = () => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const { x, y } = getAutoPlace();
+    const base = getInsertionStyle();
+    const warnings = [];
+    const width = 360;
+    addTitleBannerItem(page, 'タイトル', base, x, y, width, warnings);
+    const last = page.items[page.items.length - 1];
+    if (last) {
+      state.selectedItemIds = [last.id];
+      state.selectedItemId = last.id;
+    }
+    renderAll();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const addComponentChip = () => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const { x, y } = getAutoPlace();
+    const base = getInsertionStyle();
+    addChipRow(page, ['1つ分の数'], base, x, y, 240);
+    const last = page.items[page.items.length - 1];
+    if (last) {
+      state.selectedItemIds = [last.id];
+      state.selectedItemId = last.id;
+    }
+    renderAll();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const addComponentQuestionBox = () => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const { x, y } = getAutoPlace();
+    const base = getInsertionStyle();
+    const style = buildPresetStyle(base, {
+      bgTransparent: false,
+      bgColor: '#fff5cc',
+      borderColor: '#f4c542',
+      borderWidth: 2,
+      borderRadius: 12,
+      padding: 8,
+      bold: true,
+      textAlign: 'left'
+    });
+    placeTextItem(page, '発問\nここに問いを書く', style, { x, y, w: 260, h: 120 });
+    const last = page.items[page.items.length - 1];
+    if (last) {
+      state.selectedItemIds = [last.id];
+      state.selectedItemId = last.id;
+    }
+    renderAll();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const addComponentGuideBox = () => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const { x, y } = getAutoPlace();
+    const base = getInsertionStyle();
+    const style = buildPresetStyle(base, {
+      bgTransparent: false,
+      bgColor: '#e8f4ff',
+      borderColor: '#4aa3ff',
+      borderWidth: 2,
+      borderRadius: 12,
+      padding: 8,
+      bold: true,
+      textAlign: 'left'
+    });
+    placeTextItem(page, '指導\nここに指導のポイント', style, { x, y, w: 280, h: 130 });
+    const last = page.items[page.items.length - 1];
+    if (last) {
+      state.selectedItemIds = [last.id];
+      state.selectedItemId = last.id;
+    }
+    renderAll();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const addComponentBubble = () => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const { x, y } = getAutoPlace();
+    const base = getInsertionStyle();
+    const style = buildPresetStyle(base, {
+      bgTransparent: false,
+      bgColor: '#ffffff',
+      borderColor: '#aab4c2',
+      borderWidth: 2,
+      borderRadius: 18,
+      padding: 10,
+      bold: false,
+      textAlign: 'left'
+    });
+    placeTextItem(page, 'ふきだし\n短いコメント', style, { x, y, w: 220, h: 110 });
+    const last = page.items[page.items.length - 1];
+    if (last) {
+      state.selectedItemIds = [last.id];
+      state.selectedItemId = last.id;
+    }
+    renderAll();
+    scheduleSave();
+    pushHistory();
+  };
+
+  const addComponentAnswerGrid = () => {
+    const page = getSelectedPage();
+    if (!page) return;
+    const { x, y } = getAutoPlace();
+    const cell = 48;
+    const diagram = generateGridSvg({
+      rows: 3,
+      cols: 3,
+      cell,
+      gap: 6,
+      kind: 'grid',
+      fill: 'transparent',
+      stroke: '#7c8aa0'
+    });
+    const item = createSvgItem(diagram.svg, diagram.width, diagram.height, 'grid');
+    item.x = x;
+    item.y = y;
     page.items.push(item);
     state.selectedItemIds = [item.id];
     state.selectedItemId = item.id;
@@ -3120,6 +4282,7 @@
         applyPageSize(state.view.pageSize);
         renderPages();
         updateMainTextCounter();
+        scheduleAiPromptUpdate();
         scheduleSave();
       });
     }
@@ -3240,6 +4403,19 @@
     if (templateGoal) templateGoal.addEventListener('click', () => addTemplateItem('goal'));
     if (templateSummary) templateSummary.addEventListener('click', () => addTemplateItem('summary'));
     if (templateQuestion) templateQuestion.addEventListener('click', () => addTemplateItem('question'));
+
+    const compTitle = $('#comp-title-banner');
+    const compChip = $('#comp-chip');
+    const compQuestion = $('#comp-question-box');
+    const compGuide = $('#comp-guide-box');
+    const compBubble = $('#comp-bubble');
+    const compAnswer = $('#comp-answer-grid');
+    if (compTitle) compTitle.addEventListener('click', addComponentTitleBanner);
+    if (compChip) compChip.addEventListener('click', addComponentChip);
+    if (compQuestion) compQuestion.addEventListener('click', addComponentQuestionBox);
+    if (compGuide) compGuide.addEventListener('click', addComponentGuideBox);
+    if (compBubble) compBubble.addEventListener('click', addComponentBubble);
+    if (compAnswer) compAnswer.addEventListener('click', addComponentAnswerGrid);
 
     const addLineDiagram = $('#add-line-diagram');
     const lineKind = $('#line-kind');
@@ -3375,14 +4551,26 @@
 
     const mainText = $('#main-text');
     if (mainText) {
-      mainText.addEventListener('input', updateMainTextCounter);
+      mainText.addEventListener('input', () => {
+        updateMainTextCounter();
+        scheduleAiPromptUpdate();
+      });
     }
     const fontSizeInput = $('#font-size');
     const lineHeightInput = $('#line-height');
     const fontFamilySelect = $('#font-family');
-    if (fontSizeInput) fontSizeInput.addEventListener('input', updateMainTextCounter);
-    if (lineHeightInput) lineHeightInput.addEventListener('input', updateMainTextCounter);
-    if (fontFamilySelect) fontFamilySelect.addEventListener('change', updateMainTextCounter);
+    if (fontSizeInput) fontSizeInput.addEventListener('input', () => {
+      updateMainTextCounter();
+      scheduleAiPromptUpdate();
+    });
+    if (lineHeightInput) lineHeightInput.addEventListener('input', () => {
+      updateMainTextCounter();
+      scheduleAiPromptUpdate();
+    });
+    if (fontFamilySelect) fontFamilySelect.addEventListener('change', () => {
+      updateMainTextCounter();
+      scheduleAiPromptUpdate();
+    });
 
     $('#add-image').addEventListener('click', () => $('#image-input').click());
     $('#image-input').addEventListener('change', (e) => {
@@ -3397,7 +4585,12 @@
     const emojiToggle = $('#emoji-picker-toggle');
     const emojiPop = $('#emoji-picker-pop');
     let emojiPicker = null;
-    let emojiDataPromise = null;
+    let emojiDataPromise = fetch('https://cdn.jsdelivr.net/npm/@emoji-mart/data')
+  .then(res => res.json())
+  .catch((err) => {
+    console.warn('Emoji Mart のデータ取得に失敗しました。', err);
+    return {};
+  });
 
     const closeEmojiPicker = () => {
       if (!emojiPop) return;
@@ -3492,10 +4685,62 @@
     if (fontVertical) fontVertical.addEventListener('change', syncCombineDigits);
     syncCombineDigits();
 
-    $('#book-title').addEventListener('input', (e) => { state.project.title = e.target.value; scheduleSave(); });
-    $('#book-subject').addEventListener('input', (e) => { state.project.subject = e.target.value; scheduleSave(); });
-    $('#book-grade').addEventListener('input', (e) => { state.project.grade = e.target.value; scheduleSave(); });
-    $('#book-author').addEventListener('input', (e) => { state.project.author = e.target.value; scheduleSave(); });
+    $('#book-title').addEventListener('input', (e) => {
+      state.project.title = e.target.value;
+      scheduleAiPromptUpdate();
+      scheduleSave();
+    });
+    $('#book-subject').addEventListener('input', (e) => {
+      state.project.subject = e.target.value;
+      scheduleAiPromptUpdate();
+      scheduleSave();
+    });
+    $('#book-grade').addEventListener('input', (e) => {
+      state.project.grade = e.target.value;
+      scheduleAiPromptUpdate();
+      scheduleSave();
+    });
+    $('#book-author').addEventListener('input', (e) => {
+      state.project.author = e.target.value;
+      scheduleAiPromptUpdate();
+      scheduleSave();
+    });
+
+    const aiPrompt = $('#ai-prompt');
+    const aiInput = $('#ai-input');
+    const aiCopy = $('#ai-copy-prompt');
+    const aiRefresh = $('#ai-refresh-prompt');
+    const aiApply = $('#ai-apply');
+    const aiClear = $('#ai-clear');
+    if (aiRefresh) {
+      aiRefresh.addEventListener('click', () => {
+        updateAiPrompt();
+        setAiStatus('プロンプトを更新しました。', 'info');
+      });
+    }
+    if (aiCopy) {
+      aiCopy.addEventListener('click', async () => {
+        const text = aiPrompt?.value || buildAiPrompt();
+        const ok = await copyToClipboard(text);
+        setAiStatus(ok ? 'プロンプトをコピーしました。' : 'コピーに失敗しました。', ok ? 'success' : 'danger');
+      });
+    }
+    if (aiApply) {
+      aiApply.addEventListener('click', () => {
+        const data = parseAiInput(aiInput?.value || '');
+        if (!data) {
+          setAiStatus('AI出力が空です。', 'danger');
+          return;
+        }
+        applyAiContent(data);
+      });
+    }
+    if (aiClear) {
+      aiClear.addEventListener('click', () => {
+        if (aiInput) aiInput.value = '';
+        setAiStatus('', 'info');
+      });
+    }
 
     $('#inspector').addEventListener('input', (e) => {
       const items = getSelectedItems();
@@ -3666,6 +4911,7 @@
     if (!state.selectedPageId) {
       state.selectedPageId = state.pages[0].id;
     }
+    setupPanelSections();
     bindPanelResizers();
     bindEvents();
     renderAll();
