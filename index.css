@@ -201,6 +201,27 @@ aside.collapsed .panel-header .badge {
   background: #16171d;
 }
 
+#ai-panel .ai-photo-tools,
+#ai-panel .ai-spread-tools {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed #3b3c46;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#ai-panel .ai-mini-title {
+  font-size: 0.8rem;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+#ai-panel .ai-photo-tools .inline-row button,
+#ai-panel .ai-spread-tools .inline-row button {
+  font-size: 0.76rem;
+}
+
 #ai-status {
   min-height: 18px;
 }
@@ -496,6 +517,18 @@ button.danger {
   padding: 6px 8px;
   border-radius: 8px;
   background: transparent;
+}
+
+.item.chip .item-content {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item.chip.editing .item-content {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .item.draw {

@@ -10,6 +10,7 @@
   const HISTORY_LIMIT = 40;
   const FULLSCREEN_CLASS = 'fullscreen-preview';
   const GRID_KINDS = new Set(['tile', 'dot', 'array', 'ohajiki', 'bead', 'grid']);
+  const AI_CHIP_WARN_LEN = 12;
   let saveTimer = null;
   let saveRetryAt = 0;
   let saveFailNotified = false;
@@ -730,6 +731,14 @@
     return avg || Math.max(6, style.fontSize * 0.6);
   };
 
+  const getSingleLineHeight = (style) => {
+    const fontSize = typeof style.fontSize === 'number' ? style.fontSize : 16;
+    const lineHeight = typeof style.lineHeight === 'number' ? style.lineHeight : 1.2;
+    const padding = typeof style.padding === 'number' ? style.padding : 0;
+    const border = typeof style.borderWidth === 'number' ? style.borderWidth : 0;
+    return Math.ceil(fontSize * lineHeight + padding * 2 + border * 2 + 2);
+  };
+
   const getTextCapacity = (pageId, style) => {
     const { width: pageW, height: pageH } = getPagePixelSize(pageId);
     const marginX = 40;
@@ -865,7 +874,7 @@
     return { pageW, pageH, usableWidth, bodyWidth, sideWidth, contentHeight, sideBlockHeight };
   };
 
-  const buildAiPrompt = () => {
+  const getAiPromptContext = () => {
     const page = getSelectedPage();
     const style = getInsertionStyle();
     const { bodyWidth, contentHeight, sideWidth, sideBlockHeight } = getAiLayoutMetrics(page?.id, style);
@@ -892,6 +901,40 @@
     const sideLineMax = Math.max(3, Math.floor(sideCap.maxLines * 0.8));
     const sideLineChars = Math.max(8, sideCap.charsPerLine);
 
+    return {
+      pageSizeLabel,
+      style,
+      subject,
+      grade,
+      title,
+      author,
+      bodyMax,
+      sideMax,
+      bodyLineMax,
+      bodyLineGoal,
+      bodyLineChars,
+      sideLineMax,
+      sideLineChars
+    };
+  };
+
+  const buildAiPrompt = () => {
+    const {
+      pageSizeLabel,
+      style,
+      subject,
+      grade,
+      title,
+      author,
+      bodyMax,
+      sideMax,
+      bodyLineMax,
+      bodyLineGoal,
+      bodyLineChars,
+      sideLineMax,
+      sideLineChars
+    } = getAiPromptContext();
+
     return [
       'あなたは教科書メーカー用の1ページ素材を作ります。',
       '最優先: 1ページに必ず収まる短さにすること。',
@@ -909,16 +952,18 @@
       `- 本文は最大 ${bodyMax} 文字程度`,
       `- 本文は ${bodyLineGoal}〜${bodyLineMax} 行が目安`,
       `- 1行は全角${bodyLineChars}文字以内 (改行で調整)`,
-      `- ポイントは最大5件 (1件${sideLineChars}文字以内)`,
-      `- 用語は最大4件 (1件${sideLineChars}文字以内)`,
-      `- 問いは最大3件 (1件${sideLineChars}文字以内)`,
-      `- 右側ボックスは合計 ${sideMax} 文字程度`,
-      `- 右側ボックスの1行は全角${sideLineChars}文字以内、最大${sideLineMax}行`,
+        `- ポイントは最大5件 (1件${sideLineChars}文字以内)`,
+        `- 用語は最大4件 (1件${sideLineChars}文字以内)`,
+        `- 問いは最大3件 (1件${sideLineChars}文字以内)`,
+        '- チップは最大6件 (1件全角8文字以内・改行なし)',
+        `- 右側ボックスは合計 ${sideMax} 文字程度`,
+        `- 右側ボックスの1行は全角${sideLineChars}文字以内、最大${sideLineMax}行`,
       '',
-      '書き方の注意:',
-      '- 長文を避け、短い文に分割する',
-      '- 箇条書きは1行で完結',
-      '- 改行を入れて読みやすくする',
+        '書き方の注意:',
+        '- 長文を避け、短い文に分割する',
+        '- 箇条書きは1行で完結',
+        '- 改行を入れて読みやすくする',
+        '- チップは短く、改行しない',
       '',
       'page_type は次のいずれか:',
       '- intro_visual（導入＋場面）',
@@ -955,6 +1000,223 @@
       '#QUESTIONS',
       '- 問い1'
     ].join('\n');
+  };
+
+  const buildPhotoPrompt = (format = 'json') => {
+    const {
+      pageSizeLabel,
+      style,
+      subject,
+      grade,
+      title,
+      author,
+      bodyMax,
+      sideMax,
+      bodyLineMax,
+      bodyLineGoal,
+      bodyLineChars,
+      sideLineMax,
+      sideLineChars
+    } = getAiPromptContext();
+    const isJson = format === 'json';
+    const formatLabel = isJson ? 'JSON' : 'タグ形式';
+    const visualRule = isJson
+      ? '- 図や写真は出力しない（必要なら visual_caption で短く説明）'
+      : '- 図や写真は出力しない（必要なら #BODY の1行で短く説明）';
+
+    const baseLines = [
+      'あなたは教科書メーカーの自動レイアウト用データを作成します。',
+      '入力は教科書や教材の写真1枚です。画像内の文字をできるだけ忠実に転写してください。',
+      '最優先: 1ページに必ず収まる短さにすること。',
+      isJson ? '出力はJSONのみ。説明やMarkdownは禁止。' : '出力はタグ形式のみ。説明やMarkdownは禁止。',
+      '',
+      `教科: ${subject}`,
+      `学年: ${grade}`,
+      `教材名: ${title}`,
+      `作成者: ${author}`,
+      `用紙: ${pageSizeLabel}`,
+      `本文フォント: ${style.fontSize}px / 行間 ${style.lineHeight}`,
+      '',
+      '読み取りルール:',
+      '- 要約や言い換えはしない',
+      visualRule,
+      '- 読めない文字は [判読不能]',
+      '- 読み順は左上 → 右下',
+      '',
+      '分量の目安:',
+      `- 本文は最大 ${bodyMax} 文字程度`,
+      `- 本文は ${bodyLineGoal}〜${bodyLineMax} 行が目安`,
+      `- 1行は全角${bodyLineChars}文字以内 (改行で調整)`,
+      `- ポイントは最大5件 (1件${sideLineChars}文字以内)`,
+      `- 用語は最大4件 (1件${sideLineChars}文字以内)`,
+      `- 問いは最大3件 (1件${sideLineChars}文字以内)`,
+      '- チップは最大6件 (1件全角8文字以内・改行なし)',
+      `- 右側ボックスは合計 ${sideMax} 文字程度`,
+      `- 右側ボックスの1行は全角${sideLineChars}文字以内、最大${sideLineMax}行`,
+      '',
+      '分類のヒント:',
+      '- 見出しは title / subtitle',
+      '- 本文は body_lines に改行で分割',
+      '- 箇条書きは points',
+      '- 用語欄は glossary（用語: 説明）',
+      '- 問いは questions',
+      '- 小さなラベルは chips',
+      '- 例題や式は example_lines',
+      '- チップは短く、改行や句点を入れない',
+      ''
+    ];
+
+    if (isJson) {
+      return baseLines.concat([
+        'page_type は次のいずれか:',
+        '- intro_visual（導入＋場面）',
+        '- example_explain（例題＋説明）',
+        '- practice（練習）',
+        '- summary（まとめ）',
+        '- generic（汎用）',
+        '',
+        'JSON出力の例:',
+        '{',
+        '  "page_type": "intro_visual",',
+        '  "title": "ここにタイトル",',
+        '  "subtitle": "ここにサブタイトル",',
+        '  "visual_caption": "図や場面の短い説明",',
+        '  "body_lines": ["1行目", "2行目", "3行目"],',
+        '  "example_lines": ["4×3=12", "この式は..."],',
+        '  "chips": ["短いラベル1", "短いラベル2"],',
+        '  "points": ["ポイント1", "ポイント2"],',
+        '  "glossary": ["用語: 説明", "用語: 説明"],',
+        '  "questions": ["問い1", "問い2"]',
+        '}'
+      ]).join('\n');
+    }
+
+    return baseLines.concat([
+      `${formatLabel}の見出しは次の通り:`,
+      '- #TITLE #SUBTITLE #BODY #POINTS #GLOSSARY #QUESTIONS #CHIPS #EXAMPLE',
+      '',
+      'タグ形式の例:',
+      '#TITLE',
+      'ここにタイトル',
+      '#SUBTITLE',
+      'ここにサブタイトル',
+      '#BODY',
+      'ここに本文',
+      '#POINTS',
+      '- ポイント1',
+      '- ポイント2',
+      '#GLOSSARY',
+      '- 用語: 説明',
+      '#QUESTIONS',
+      '- 問い1',
+      '#CHIPS',
+      '- ラベル1',
+      '#EXAMPLE',
+      '4×3=12'
+    ]).join('\n');
+  };
+
+  const buildSpreadPrompt = (format = 'json') => {
+    const {
+      pageSizeLabel,
+      style,
+      subject,
+      grade,
+      title,
+      author,
+      bodyMax,
+      sideMax,
+      bodyLineMax,
+      bodyLineGoal,
+      bodyLineChars,
+      sideLineMax,
+      sideLineChars
+    } = getAiPromptContext();
+    const isJson = format === 'json';
+    const isRtl = state.view.pageTurn === 'rtl';
+    const page1Label = isRtl ? '右ページ' : '左ページ';
+    const page2Label = isRtl ? '左ページ' : '右ページ';
+
+    const baseLines = [
+      'あなたは教科書メーカー用の見開き2ページ素材を作ります。',
+      'ページ1とページ2に分けて出力してください。',
+      isJson ? '出力はJSONのみ。説明やMarkdownは禁止。' : '出力はタグ形式のみ。説明やMarkdownは禁止。',
+      '',
+      `ページ1 = ${page1Label} / ページ2 = ${page2Label}`,
+      '',
+      `教科: ${subject}`,
+      `学年: ${grade}`,
+      `教材名: ${title}`,
+      `作成者: ${author}`,
+      `用紙: ${pageSizeLabel}`,
+      `本文フォント: ${style.fontSize}px / 行間 ${style.lineHeight}`,
+      '',
+      '分量の目安（各ページごと）:',
+      `- 本文は最大 ${bodyMax} 文字程度`,
+      `- 本文は ${bodyLineGoal}〜${bodyLineMax} 行が目安`,
+      `- 1行は全角${bodyLineChars}文字以内 (改行で調整)`,
+      `- ポイントは最大5件 (1件${sideLineChars}文字以内)`,
+      `- 用語は最大4件 (1件${sideLineChars}文字以内)`,
+      `- 問いは最大3件 (1件${sideLineChars}文字以内)`,
+      '- チップは最大6件 (1件全角8文字以内・改行なし)',
+      `- 右側ボックスは合計 ${sideMax} 文字程度`,
+      `- 右側ボックスの1行は全角${sideLineChars}文字以内、最大${sideLineMax}行`,
+      '',
+      '書き方の注意:',
+      '- 長文を避け、短い文に分割する',
+      '- 箇条書きは1行で完結',
+      '- 改行を入れて読みやすくする',
+      '- チップは短く、改行しない',
+      ''
+    ];
+
+    if (isJson) {
+      return baseLines.concat([
+        'JSON出力の形式:',
+        '{',
+        '  "pages": [',
+        '    {',
+        '      "page_type": "intro_visual",',
+        '      "title": "ここにタイトル",',
+        '      "subtitle": "ここにサブタイトル",',
+        '      "visual_caption": "図や場面の短い説明",',
+        '      "body_lines": ["1行目", "2行目", "3行目"],',
+        '      "example_lines": ["4×3=12", "この式は..."],',
+        '      "chips": ["短いラベル1", "短いラベル2"],',
+        '      "points": ["ポイント1", "ポイント2"],',
+        '      "glossary": ["用語: 説明", "用語: 説明"],',
+        '      "questions": ["問い1", "問い2"]',
+        '    },',
+        '    {',
+        '      "page_type": "example_explain",',
+        '      "title": "2ページ目のタイトル",',
+        '      "subtitle": "2ページ目のサブタイトル",',
+        '      "body_lines": ["1行目", "2行目"],',
+        '      "points": ["ポイント1"],',
+        '      "questions": ["問い1"]',
+        '    }',
+        '  ]',
+        '}'
+      ]).join('\n');
+    }
+
+    return baseLines.concat([
+      'タグ形式のルール:',
+      '- #PAGE1 と #PAGE2 でページを分ける',
+      '- ページ内は #TITLE #SUBTITLE #BODY #POINTS #GLOSSARY #QUESTIONS #CHIPS #EXAMPLE を使う',
+      '',
+      'タグ形式の例:',
+      '#PAGE1',
+      '#TITLE',
+      'ページ1のタイトル',
+      '#BODY',
+      'ページ1の本文',
+      '#PAGE2',
+      '#TITLE',
+      'ページ2のタイトル',
+      '#BODY',
+      'ページ2の本文'
+    ]).join('\n');
   };
 
   const updateAiPrompt = () => {
@@ -1077,7 +1339,38 @@
     return result;
   };
 
-  const normalizeAiData = (raw) => {
+  const parseAiTaggedMulti = (text) => {
+    const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+    const pageLines = [[], []];
+    let currentPage = null;
+    let hasMarker = false;
+    const marker = /^#\s*(PAGE1|PAGE2|PAGE_1|PAGE_2|PAGE\s*1|PAGE\s*2|LEFT|RIGHT)\b/i;
+
+    lines.forEach((line) => {
+      const hit = line.trim().match(marker);
+      if (hit) {
+        hasMarker = true;
+        const token = hit[1].toUpperCase().replace(/\s+/g, '');
+        currentPage = (token.includes('2') || token === 'RIGHT') ? 1 : 0;
+        return;
+      }
+      if (!hasMarker) {
+        pageLines[0].push(line);
+        return;
+      }
+      if (currentPage == null) return;
+      pageLines[currentPage].push(line);
+    });
+
+    if (!hasMarker) {
+      return parseAiTagged(text);
+    }
+    return {
+      pages: pageLines.map(block => parseAiTagged(block.join('\n')))
+    };
+  };
+
+  const normalizeAiPageData = (raw) => {
     if (!raw || typeof raw !== 'object') {
       const bodyText = typeof raw === 'string' ? raw : '';
       return { title: '', subtitle: '', body: bodyText, points: [], glossary: [], questions: [] };
@@ -1112,18 +1405,88 @@
       exampleLines = Object.values(exampleRaw).map(line => String(line || '').trim()).filter(Boolean);
     }
     const pageType = String(pageTypeRaw || '').trim().toLowerCase();
-    return {
-      pageType,
-      title: String(title || '').trim(),
-      subtitle: String(subtitle || '').trim(),
-      body: String(body || '').trim(),
-      points,
-      glossary,
-      questions,
-      visualCaption: String(visualCaption || '').trim(),
-      exampleLines,
-      chips
+      return {
+        pageType,
+        title: String(title || '').trim(),
+        subtitle: String(subtitle || '').trim(),
+        body: String(body || '').trim(),
+        points,
+        glossary,
+        questions,
+        visualCaption: String(visualCaption || '').trim(),
+        exampleLines,
+        chips
+      };
     };
+
+  const hasAiPageContent = (page) => {
+    if (!page) return false;
+    return !!(
+      page.title || page.subtitle || page.body || page.visualCaption ||
+      (page.points && page.points.length) ||
+      (page.glossary && page.glossary.length) ||
+      (page.questions && page.questions.length) ||
+      (page.chips && page.chips.length) ||
+      (page.exampleLines && page.exampleLines.length)
+    );
+  };
+
+  const normalizeAiData = (raw) => {
+    if (Array.isArray(raw)) {
+      const pages = raw.map(normalizeAiPageData).filter(hasAiPageContent);
+      return pages.length ? { pages } : normalizeAiPageData(raw[0]);
+    }
+    if (raw && typeof raw === 'object') {
+      if (Array.isArray(raw.pages)) {
+        const pages = raw.pages.map(normalizeAiPageData).filter(hasAiPageContent);
+        return pages.length ? { pages } : normalizeAiPageData(raw);
+      }
+      if (raw.spread) {
+        const spread = raw.spread;
+        if (Array.isArray(spread.pages)) {
+          const pages = spread.pages.map(normalizeAiPageData).filter(hasAiPageContent);
+          return pages.length ? { pages } : normalizeAiPageData(raw);
+        }
+        if (spread.left || spread.right) {
+          const pages = [spread.left, spread.right].filter(Boolean).map(normalizeAiPageData).filter(hasAiPageContent);
+          return pages.length ? { pages } : normalizeAiPageData(raw);
+        }
+      }
+      if (raw.left || raw.right) {
+        const pages = [raw.left, raw.right].filter(Boolean).map(normalizeAiPageData).filter(hasAiPageContent);
+        return pages.length ? { pages } : normalizeAiPageData(raw);
+      }
+      if (raw.page1 || raw.page2) {
+        const pages = [raw.page1, raw.page2].filter(Boolean).map(normalizeAiPageData).filter(hasAiPageContent);
+        return pages.length ? { pages } : normalizeAiPageData(raw);
+      }
+    }
+    return normalizeAiPageData(raw);
+  };
+
+  const hasUnreadableText = (value) => {
+    if (!value) return false;
+    if (typeof value === 'string') return value.includes('[判読不能]');
+    if (Array.isArray(value)) return value.some(hasUnreadableText);
+    if (typeof value === 'object') {
+      return Object.values(value).some(hasUnreadableText);
+    }
+    return false;
+  };
+
+  const collectAiWarnings = (data) => {
+    const warnings = [];
+    if (hasUnreadableText(data)) {
+      warnings.push('判読不能の箇所があります。内容を確認してください。');
+    }
+    const chips = Array.isArray(data?.chips) ? data.chips : [];
+    const longChips = chips
+      .map(chip => String(chip || '').replace(/\s+/g, '').trim())
+      .filter(text => text.length >= AI_CHIP_WARN_LEN);
+    if (longChips.length) {
+      warnings.push(`チップが長い項目が${longChips.length}件あります。省略表示になります。`);
+    }
+    return warnings;
   };
 
   const parseAiInput = (raw) => {
@@ -1155,7 +1518,7 @@
       }
     }
     if (parsed) return normalizeAiData(parsed);
-    return normalizeAiData(parseAiTagged(text));
+    return normalizeAiData(parseAiTaggedMulti(text));
   };
 
   const setAiStatus = (message, type = 'info') => {
@@ -1327,23 +1690,26 @@
       borderRadius: 999,
       padding: 6,
       textAlign: 'center',
-      lineHeight: 1.2
+      lineHeight: 1.2,
+      vertical: false,
+      textCombine: false
     });
     let cursorX = x;
     let cursorY = y;
     let rowHeight = 0;
     const gap = 6;
     items.forEach((raw) => {
-      const text = String(raw || '').trim();
+      const text = String(raw || '').replace(/\s+/g, ' ').trim();
       if (!text) return;
-      const width = Math.max(64, measureAverageCharWidth(style) * text.length + (style.padding || 0) * 2 + 18);
-      const height = Math.max(28, style.fontSize * 1.4 + (style.padding || 0) * 2);
+      const estimated = measureAverageCharWidth(style) * text.length + (style.padding || 0) * 2 + 18;
+      const width = Math.min(Math.max(64, estimated), maxWidth);
+      const height = Math.max(28, getSingleLineHeight(style));
       if (cursorX + width > x + maxWidth) {
         cursorX = x;
         cursorY += rowHeight + gap;
         rowHeight = 0;
       }
-      const item = createTextItem(text, style, 'text');
+      const item = createTextItem(text, style, 'chip');
       item.x = cursorX;
       item.y = cursorY;
       item.w = width;
@@ -1640,90 +2006,114 @@
     }
   };
 
-  const applyAiContent = (data) => {
-    if (!data) {
-      setAiStatus('AI出力が空です。', 'danger');
-      return;
-    }
-    const title = String(data.title || '').trim();
-    const subtitle = String(data.subtitle || '').trim();
-    const body = String(data.body || '').trim();
-    let points = Array.isArray(data.points) ? data.points : [];
-    let glossary = Array.isArray(data.glossary) ? data.glossary : [];
-    let questions = Array.isArray(data.questions) ? data.questions : [];
-    if (!title && !subtitle && !body && !points.length && !glossary.length && !questions.length) {
-      setAiStatus('AI出力の内容が見つかりませんでした。', 'danger');
-      return;
-    }
+    const applyAiContent = (data) => {
+      if (!data) {
+        setAiStatus('AI出力が空です。', 'danger');
+        return;
+      }
+      const pages = Array.isArray(data.pages) && data.pages.length ? data.pages : [data];
+      const baseStyle = getInsertionStyle();
+      const warnings = [];
+      let createdCount = 0;
+      let lastItem = null;
 
-    const page = insertPageAfterSelected();
-    const baseStyle = getInsertionStyle();
-    const warnings = [];
-    const maxPointCount = 5;
-    const maxGlossaryCount = 4;
-    const maxQuestionCount = 3;
-    if (points.length > maxPointCount) {
-      points = points.slice(0, maxPointCount);
-      warnings.push('ポイントを一部省略しました。');
-    }
-    if (glossary.length > maxGlossaryCount) {
-      glossary = glossary.slice(0, maxGlossaryCount);
-      warnings.push('用語を一部省略しました。');
-    }
-    if (questions.length > maxQuestionCount) {
-      questions = questions.slice(0, maxQuestionCount);
-      warnings.push('問いを一部省略しました。');
-    }
+      const buildPayload = (pageData) => {
+        const title = String(pageData.title || '').trim();
+        const subtitle = String(pageData.subtitle || '').trim();
+        const body = String(pageData.body || '').trim();
+        let points = Array.isArray(pageData.points) ? pageData.points : [];
+        let glossary = Array.isArray(pageData.glossary) ? pageData.glossary : [];
+        let questions = Array.isArray(pageData.questions) ? pageData.questions : [];
+        if (!title && !subtitle && !body && !points.length && !glossary.length && !questions.length) {
+          return null;
+        }
 
-    const mergedTitle = title && subtitle ? `${title}\n${subtitle}` : (title || subtitle || '');
-    const payload = {
-      ...data,
-      title: mergedTitle || 'タイトル',
-      subtitle,
-      body,
-      points,
-      glossary,
-      questions
+        const maxPointCount = 5;
+        const maxGlossaryCount = 4;
+        const maxQuestionCount = 3;
+        if (points.length > maxPointCount) {
+          points = points.slice(0, maxPointCount);
+          warnings.push('ポイントを一部省略しました。');
+        }
+        if (glossary.length > maxGlossaryCount) {
+          glossary = glossary.slice(0, maxGlossaryCount);
+          warnings.push('用語を一部省略しました。');
+        }
+        if (questions.length > maxQuestionCount) {
+          questions = questions.slice(0, maxQuestionCount);
+          warnings.push('問いを一部省略しました。');
+        }
+
+        const mergedTitle = title && subtitle ? `${title}\n${subtitle}` : (title || subtitle || '');
+        const payload = {
+          ...pageData,
+          title: mergedTitle || 'タイトル',
+          subtitle,
+          body,
+          points,
+          glossary,
+          questions
+        };
+        const aiWarnings = collectAiWarnings(payload);
+        if (aiWarnings.length) {
+          warnings.push(...aiWarnings);
+        }
+        return payload;
+      };
+
+      pages.forEach((pageData) => {
+        const payload = buildPayload(pageData || {});
+        if (!payload) return;
+        createdCount += 1;
+        const page = insertPageAfterSelected();
+        let pageType = normalizePageType(payload.pageType || payload.page_type);
+        if (!pageType) {
+          if (payload.visualCaption) pageType = 'intro_visual';
+          else if (payload.exampleLines?.length || payload.chips?.length) pageType = 'example_explain';
+          else if (payload.questions?.length && !payload.body) pageType = 'practice';
+          else if (payload.points?.length && !payload.body) pageType = 'summary';
+          else pageType = 'generic';
+        }
+
+        if (pageType === 'intro_visual') {
+          applyAiTemplateIntro(page, payload, baseStyle, warnings);
+        } else if (pageType === 'example_explain') {
+          applyAiTemplateExample(page, payload, baseStyle, warnings);
+        } else if (pageType === 'practice') {
+          applyAiTemplatePractice(page, payload, baseStyle, warnings);
+        } else if (pageType === 'summary') {
+          applyAiTemplateSummary(page, payload, baseStyle, warnings);
+        } else {
+          applyAiTemplateGeneric(page, payload, baseStyle, warnings);
+        }
+
+        const tail = page.items[page.items.length - 1];
+        if (tail) lastItem = tail;
+      });
+
+      if (!createdCount) {
+        setAiStatus('AI出力の内容が見つかりませんでした。', 'danger');
+        return;
+      }
+
+      if (lastItem) {
+        state.selectedItemIds = [lastItem.id];
+        state.selectedItemId = lastItem.id;
+      }
+
+      renderAll();
+      scheduleSave();
+      pushHistory();
+
+      const pageLabel = createdCount > 1 ? `${createdCount}ページ` : '1ページ';
+      if (warnings.length) {
+        setAiStatus(`${pageLabel}を追加しました。 ${warnings.join(' / ')}`, 'info');
+        showToast(`AIページを${createdCount}ページ追加しました。`, 'success');
+      } else {
+        setAiStatus(`AI${pageLabel}を追加しました。`, 'success');
+        showToast(`AIページを${createdCount}ページ追加しました。`, 'success');
+      }
     };
-    let pageType = normalizePageType(payload.pageType || payload.page_type);
-    if (!pageType) {
-      if (payload.visualCaption) pageType = 'intro_visual';
-      else if (payload.exampleLines?.length || payload.chips?.length) pageType = 'example_explain';
-      else if (payload.questions?.length && !payload.body) pageType = 'practice';
-      else if (payload.points?.length && !payload.body) pageType = 'summary';
-      else pageType = 'generic';
-    }
-
-    if (pageType === 'intro_visual') {
-      applyAiTemplateIntro(page, payload, baseStyle, warnings);
-    } else if (pageType === 'example_explain') {
-      applyAiTemplateExample(page, payload, baseStyle, warnings);
-    } else if (pageType === 'practice') {
-      applyAiTemplatePractice(page, payload, baseStyle, warnings);
-    } else if (pageType === 'summary') {
-      applyAiTemplateSummary(page, payload, baseStyle, warnings);
-    } else {
-      applyAiTemplateGeneric(page, payload, baseStyle, warnings);
-    }
-
-    const lastItem = page.items[page.items.length - 1];
-    if (lastItem) {
-      state.selectedItemIds = [lastItem.id];
-      state.selectedItemId = lastItem.id;
-    }
-
-    renderAll();
-    scheduleSave();
-    pushHistory();
-
-    if (warnings.length) {
-      setAiStatus(warnings.join(' / '), 'info');
-      showToast('AIページを追加しました。', 'success');
-    } else {
-      setAiStatus('AIページを追加しました。', 'success');
-      showToast('AIページを追加しました。', 'success');
-    }
-  };
 
   const PAGE_SIZES = {
     'A4-P': { w: 210, h: 297, unit: 'mm' },
@@ -2029,10 +2419,17 @@
       pageEl.appendChild(label);
       pageEl.appendChild(grid);
 
-      page.items.forEach((item) => {
-        const itemEl = document.createElement('div');
-        itemEl.className = `item ${item.type} ${selectedIds.has(item.id) ? 'selected' : ''}`;
-        itemEl.dataset.itemId = item.id;
+        page.items.forEach((item) => {
+          const itemEl = document.createElement('div');
+          itemEl.className = `item ${item.type} ${selectedIds.has(item.id) ? 'selected' : ''}`;
+          if (item.kind) {
+            itemEl.classList.add(`kind-${item.kind}`);
+          }
+          const isChip = item.kind === 'chip' || (item.type === 'text' && item.borderRadius >= 900);
+          if (isChip) {
+            itemEl.classList.add('chip');
+          }
+          itemEl.dataset.itemId = item.id;
         itemEl.style.left = `${item.x}px`;
         itemEl.style.top = `${item.y}px`;
         itemEl.style.width = `${item.w}px`;
@@ -4712,6 +5109,10 @@
     const aiRefresh = $('#ai-refresh-prompt');
     const aiApply = $('#ai-apply');
     const aiClear = $('#ai-clear');
+    const aiCopyPhotoJson = $('#ai-copy-photo-json');
+    const aiCopyPhotoTag = $('#ai-copy-photo-tag');
+    const aiCopySpreadJson = $('#ai-copy-spread-json');
+    const aiCopySpreadTag = $('#ai-copy-spread-tag');
     if (aiRefresh) {
       aiRefresh.addEventListener('click', () => {
         updateAiPrompt();
@@ -4723,6 +5124,34 @@
         const text = aiPrompt?.value || buildAiPrompt();
         const ok = await copyToClipboard(text);
         setAiStatus(ok ? 'プロンプトをコピーしました。' : 'コピーに失敗しました。', ok ? 'success' : 'danger');
+      });
+    }
+    if (aiCopyPhotoJson) {
+      aiCopyPhotoJson.addEventListener('click', async () => {
+        const text = buildPhotoPrompt('json');
+        const ok = await copyToClipboard(text);
+        setAiStatus(ok ? '写真→JSONプロンプトをコピーしました。' : 'コピーに失敗しました。', ok ? 'success' : 'danger');
+      });
+    }
+    if (aiCopyPhotoTag) {
+      aiCopyPhotoTag.addEventListener('click', async () => {
+        const text = buildPhotoPrompt('tag');
+        const ok = await copyToClipboard(text);
+        setAiStatus(ok ? '写真→タグプロンプトをコピーしました。' : 'コピーに失敗しました。', ok ? 'success' : 'danger');
+      });
+    }
+    if (aiCopySpreadJson) {
+      aiCopySpreadJson.addEventListener('click', async () => {
+        const text = buildSpreadPrompt('json');
+        const ok = await copyToClipboard(text);
+        setAiStatus(ok ? '見開き→JSONプロンプトをコピーしました。' : 'コピーに失敗しました。', ok ? 'success' : 'danger');
+      });
+    }
+    if (aiCopySpreadTag) {
+      aiCopySpreadTag.addEventListener('click', async () => {
+        const text = buildSpreadPrompt('tag');
+        const ok = await copyToClipboard(text);
+        setAiStatus(ok ? '見開き→タグプロンプトをコピーしました。' : 'コピーに失敗しました。', ok ? 'success' : 'danger');
       });
     }
     if (aiApply) {

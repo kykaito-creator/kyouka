@@ -12,7 +12,7 @@
 </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>教科書メーカー V.0.1</title>
+  <title>教科書メーカー V.0.2</title>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;700&family=Noto+Serif+JP:wght@400;700&family=Yomogi&family=Hachi+Maru+Pop&family=Zen+Maru+Gothic:wght@400;700&family=DotGothic16&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="index.css">
 </head>
@@ -20,7 +20,7 @@
 <header id="app-header">
   <div class="brand">
     <span class="brand-main">教科書メーカー</span>
-    <span class="brand-sub">V.0.1</span>
+    <span class="brand-sub">V.0.2</span>
   </div>
   <div class="brand-tag">Textbook Studio</div>
 </header>
@@ -549,6 +549,24 @@
           <button id="ai-clear" type="button">クリア</button>
         </div>
         <div id="ai-status" class="hint"></div>
+        <div class="ai-photo-tools">
+          <div class="ai-mini-title">写真 → 自動レイアウト</div>
+          <div class="hint">写真をGemini等に渡すときは、下のボタンでプロンプトをコピーして画像と一緒に送ってください。</div>
+          <div class="inline-row">
+            <button id="ai-copy-photo-json" type="button">写真→JSONをコピー</button>
+            <button id="ai-copy-photo-tag" type="button">写真→タグをコピー</button>
+          </div>
+          <div class="hint">JSONは最も安定した自動レイアウト向け。タグ形式は短く簡易です。図や写真は出力せず、読めない文字は [判読不能] と書かせます。</div>
+        </div>
+        <div class="ai-spread-tools">
+          <div class="ai-mini-title">見開き2ページ</div>
+          <div class="hint">見開きで2ページ分を生成したいときはこちら。ページ1とページ2の両方を出力させます。</div>
+          <div class="inline-row">
+            <button id="ai-copy-spread-json" type="button">見開き→JSONをコピー</button>
+            <button id="ai-copy-spread-tag" type="button">見開き→タグをコピー</button>
+          </div>
+          <div class="hint">JSONは自動レイアウトが安定します。タグ形式は簡易ですが、必ず #PAGE1 / #PAGE2 を付けて分けてください。</div>
+        </div>
       </section>
 
       <section class="panel-section">
