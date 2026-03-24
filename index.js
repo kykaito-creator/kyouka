@@ -437,7 +437,7 @@
     selectedPageId: null,
     selectedItemId: null,
     selectedItemIds: [],
-    view: { mode: 'continuous', showGrid: true, zoom: 1, drawMode: false, drawTool: 'curve', snap: true, pageSize: 'A4-P', pageTurn: 'ltr', kokugoMode: false },
+    view: { mode: 'continuous', showGrid: true, zoom: 1, drawMode: false, drawTool: 'curve', snap: true, pageSize: 'A4-P', pageTurn: 'ltr', kokugoMode: false, toolbarCollapsed: false },
     support: { glossary: [], citations: [], checklist: [] }
   });
 
@@ -660,13 +660,21 @@
     }
   };
 
-  const updateView = () => {
-    const container = $('#page-container');
-    container.classList.toggle('spread', state.view.mode === 'spread');
-    container.classList.toggle('draw-mode', !!state.view.drawMode);
-    container.classList.toggle('kokugo', !!state.view.kokugoMode);
-    container.style.setProperty('--zoom', state.view.zoom);
-    $('#toggle-view').textContent = `見開き: ${state.view.mode === 'spread' ? 'ON' : 'OFF'}`;
+    const updateView = () => {
+      const container = $('#page-container');
+      container.classList.toggle('spread', state.view.mode === 'spread');
+      container.classList.toggle('draw-mode', !!state.view.drawMode);
+      container.classList.toggle('kokugo', !!state.view.kokugoMode);
+      container.style.setProperty('--zoom', state.view.zoom);
+      const toolbar = $('#toolbar');
+      if (toolbar) {
+        toolbar.classList.toggle('collapsed', !!state.view.toolbarCollapsed);
+      }
+      const toolbarToggle = $('#toggle-toolbar');
+      if (toolbarToggle) {
+        toolbarToggle.textContent = `ツールバー: ${state.view.toolbarCollapsed ? 'OFF' : 'ON'}`;
+      }
+      $('#toggle-view').textContent = `見開き: ${state.view.mode === 'spread' ? 'ON' : 'OFF'}`;
     $('#toggle-grid').textContent = `グリッド: ${state.view.showGrid ? 'ON' : 'OFF'}`;
     const pageTurnBtn = $('#toggle-page-turn');
     if (pageTurnBtn) {
@@ -4666,6 +4674,14 @@
     if (snapBtn) {
       snapBtn.addEventListener('click', () => {
         state.view.snap = !state.view.snap;
+        updateView();
+        scheduleSave();
+      });
+    }
+    const toolbarToggle = $('#toggle-toolbar');
+    if (toolbarToggle) {
+      toolbarToggle.addEventListener('click', () => {
+        state.view.toolbarCollapsed = !state.view.toolbarCollapsed;
         updateView();
         scheduleSave();
       });

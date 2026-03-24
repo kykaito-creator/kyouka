@@ -440,10 +440,15 @@
   <div id="resizer-left" class="resizer"></div>
 
   <main id="center-panel">
-    <div class="toolbar">
+    <div class="toolbar" id="toolbar">
+      <div class="toolbar-minimizer">
+        <button id="toggle-toolbar" type="button">ツールバー: ON</button>
+      </div>
       <div class="toolbar-group">
         <button id="page-add" class="primary">ページ追加</button>
         <button id="page-delete" class="danger">ページ削除</button>
+        <button id="save-local">保存</button>
+        <label class="pill">ズーム <input id="zoom-range" type="range" min="0.4" max="1.5" step="0.1" value="1"></label>
         <select id="page-select"></select>
         <button id="page-prev">前</button>
         <button id="page-next">次</button>
@@ -494,11 +499,9 @@
             <option value="Tabloid-L">Tabloid 横</option>
           </select>
         </label>
-        <label class="pill">ズーム <input id="zoom-range" type="range" min="0.4" max="1.5" step="0.1" value="1"></label>
       </div>
       <div class="toolbar-group">
         <button id="print-pdf" class="primary">PDF書き出し</button>
-        <button id="save-local">保存</button>
         <button id="load-local">読み込み</button>
         <button id="export-json">JSON書き出し</button>
         <label class="file-button pill">JSON読み込み <input id="import-json" type="file" accept="application/json"></label>

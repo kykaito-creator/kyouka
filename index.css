@@ -386,6 +386,28 @@ button.danger {
   background: #20212a;
 }
 
+.toolbar-minimizer {
+  display: flex;
+  align-items: center;
+}
+
+.toolbar.collapsed {
+  padding: 8px 12px;
+}
+
+.toolbar.collapsed .toolbar-group {
+  display: none;
+}
+
+.toolbar.collapsed .toolbar-minimizer {
+  display: flex;
+}
+
+.toolbar-minimizer button {
+  font-size: 0.72rem;
+  padding: 6px 10px;
+}
+
 .toolbar-group {
   display: flex;
   gap: 8px;
